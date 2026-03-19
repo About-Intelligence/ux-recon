@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:docs.browser-use.com)",
+      "WebFetch(domain:playwright.dev)",
+      "WebFetch(domain:developers.openai.com)",
+      "Bash(pip install:*)",
+      "Bash(playwright install:*)",
+      "Bash(python -c \"from src.config import load_config; c = load_config\\(\\); print\\(f''Config loaded OK: target={c.target.url}, depth={c.crawl.max_depth}''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(while ! grep -q \"successfully\" C:/Users/Markus/AppData/Local/Temp/claude/d--frontend-mimic-frontend-mimic/6943894d-effa-4c36-8b17-5cf26b66a18a/tasks/b7qclbkd0.output)",
+      "Bash(! grep:*)",
+      "Bash(do sleep:*)",
+      "Bash(done)",
+      "Bash(python -m src.cli --skip-ai --skip-generate)",
+      "Bash(find /d/frontend_mimic/frontend_mimic/src -type f -name *.py)"
+    ]
+  }
+}

@@ -1,0 +1,88 @@
+# Frontend Mimic Configuration
+# Copy this to settings.local.yaml and fill in your values
+
+target:
+  url: "https://example.com/login"       # Target website login URL
+  dashboard_url: ""                       # URL after login (leave empty to auto-detect)
+
+login:
+  username: ""                            # Your account username
+  password: ""                            # Your account password
+  # CSS selectors for login form elements — customize for your target site
+  username_selector: "input[type='text'], input[name='username'], input[name='email']"
+  password_selector: "input[type='password']"
+  submit_selector: "button[type='submit'], button:has-text('Login'), button:has-text('Sign in'), button:has-text('登录'), button:has-text('Log in')"
+  success_indicator: ""                   # Optional: selector visible only after login (e.g., ".user-avatar")
+
+crawl:
+  max_depth: 2                            # How many links deep from the main page
+  max_pages: 50                           # Maximum number of pages to crawl
+  wait_after_navigation: 3000             # ms to wait after each navigation
+  wait_for_spa: 2000                      # ms extra wait for SPA rendering
+  interaction_timeout: 10000              # ms timeout for interaction clicks
+  max_interaction_items: 5                # Max dropdown items to click per action button
+  retry_failed: 1                         # Retries for failed page loads
+  exclude_patterns:                       # URL patterns to skip
+    - "/logout"
+    - "/api/"
+    - ".pdf"
+    - ".zip"
+
+# Interaction selectors — customize for different UI frameworks
+# Defaults work for Element Plus, Ant Design, and Bootstrap
+interaction:
+  action_button_selectors:
+    - "button:has-text('操作')"
+    - "button:has-text('Actions')"
+    - "button:has-text('Action')"
+    - ".el-dropdown:has-text('操作') button"
+    - ".ant-dropdown-trigger"
+    - ".dropdown-toggle"
+  add_button_selectors:
+    - "button:has-text('添加')"
+    - "button:has-text('新增')"
+    - "button:has-text('Add')"
+    - "button:has-text('Create')"
+    - "button:has-text('New')"
+  dropdown_item_selector: ".el-dropdown-menu__item:visible, .ant-dropdown-menu-item:visible, .dropdown-item:visible, [role='menuitem']:visible"
+  modal_selectors:
+    - ".el-dialog:visible"
+    - ".el-drawer:visible"
+    - ".ant-modal-wrap:visible"
+    - ".modal.show"
+    - "[role='dialog']:visible"
+  modal_close_selectors:
+    - ".el-dialog__headerbtn"
+    - ".el-drawer__close-btn"
+    - ".ant-modal-close"
+    - ".modal .btn-close"
+    - "[aria-label='Close']"
+  expand_selectors:
+    - ".el-table__expand-icon"
+    - ".ant-table-row-expand-icon"
+  tab_selector: ".el-tabs__item:not(.is-active), .ant-tabs-tab:not(.ant-tabs-tab-active), .nav-link:not(.active)"
+  destructive_keywords:
+    - "删除"
+    - "delete"
+    - "remove"
+    - "drop"
+    - "destroy"
+    - "清空"
+
+browser:
+  headless: false                         # Set true for headless mode
+  viewport_width: 1920
+  viewport_height: 1080
+  slow_mo: 500                            # ms delay between actions
+
+ai:
+  provider: "claude"                      # "claude", "openai", or "both"
+  claude_model: "claude-sonnet-4-20250514"
+  openai_model: "gpt-4.1"
+  max_tokens: 4096
+
+output:
+  screenshots_dir: "output/screenshots"
+  dom_snapshots_dir: "output/dom_snapshots"
+  reports_dir: "output/reports"
+  vue_project_dir: "output/vue_project"
