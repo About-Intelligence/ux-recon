@@ -8,10 +8,8 @@ build/
 venv/
 
 # Output (generated data)
-output/screenshots/
-output/dom_snapshots/
-output/reports/
-output/vue_project/
+output/
+output_backup/
 
 # Secrets
 .env

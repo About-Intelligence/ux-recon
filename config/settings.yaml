@@ -1,4 +1,4 @@
-# Frontend Mimic Configuration
+# Frontend Mimic Agent Configuration
 # Copy this to settings.local.yaml and fill in your values
 
 target:
@@ -8,28 +8,54 @@ target:
 login:
   username: ""                            # Your account username
   password: ""                            # Your account password
-  # CSS selectors for login form elements — customize for your target site
   username_selector: "input[type='text'], input[name='username'], input[name='email']"
   password_selector: "input[type='password']"
   submit_selector: "button[type='submit'], button:has-text('Login'), button:has-text('Sign in'), button:has-text('登录'), button:has-text('Log in')"
-  success_indicator: ""                   # Optional: selector visible only after login (e.g., ".user-avatar")
+  success_indicator: ""                   # Optional: selector visible only after login
 
 crawl:
-  max_depth: 2                            # How many links deep from the main page
-  max_pages: 50                           # Maximum number of pages to crawl
-  wait_after_navigation: 3000             # ms to wait after each navigation
-  wait_for_spa: 2000                      # ms extra wait for SPA rendering
-  interaction_timeout: 10000              # ms timeout for interaction clicks
+  wait_after_navigation: 1500             # ms to wait after each navigation
+  wait_for_spa: 1500                      # ms extra wait for SPA rendering
+  interaction_timeout: 3000               # ms timeout for interaction clicks
   max_interaction_items: 5                # Max dropdown items to click per action button
-  retry_failed: 1                         # Retries for failed page loads
-  exclude_patterns:                       # URL patterns to skip
+  exclude_patterns:
     - "/logout"
     - "/api/"
     - ".pdf"
     - ".zip"
 
+budget:
+  max_states: 100                         # Total states to capture before stopping
+  max_depth: 5                            # Maximum exploration depth from root
+  retry_limit: 2                          # Max retries per failed target
+  novelty_threshold: 0.3                  # Below this, skip deep analysis (0.0-1.0)
+
+exploration:
+  skip_patterns:                          # URL/label patterns to skip
+    - "/logout"
+    - "/api/"
+    - ".pdf"
+    - ".zip"
+    - "javascript:"
+    - "mailto:"
+  destructive_keywords:                   # Button text to never click
+    - "删除"
+    - "delete"
+    - "remove"
+    - "drop"
+    - "destroy"
+    - "清空"
+    - "reset"
+  nav_selectors:                          # CSS selectors for navigation menu items (leaf items only)
+    - "a:has(> .el-menu-item)"
+    - ".el-menu-item a[href]"
+    - ".ant-menu-item > a[href]"
+    - ".ant-menu-item"
+    - "nav a[href]"
+    - ".sidebar a[href]"
+    - ".side-nav a[href]"
+
 # Interaction selectors — customize for different UI frameworks
-# Defaults work for Element Plus, Ant Design, and Bootstrap
 interaction:
   action_button_selectors:
     - "button:has-text('操作')"
@@ -61,28 +87,15 @@ interaction:
     - ".el-table__expand-icon"
     - ".ant-table-row-expand-icon"
   tab_selector: ".el-tabs__item:not(.is-active), .ant-tabs-tab:not(.ant-tabs-tab-active), .nav-link:not(.active)"
-  destructive_keywords:
-    - "删除"
-    - "delete"
-    - "remove"
-    - "drop"
-    - "destroy"
-    - "清空"
 
 browser:
-  headless: false                         # Set true for headless mode
+  headless: false
   viewport_width: 1920
   viewport_height: 1080
-  slow_mo: 500                            # ms delay between actions
-
-ai:
-  provider: "claude"                      # "claude", "openai", or "both"
-  claude_model: "claude-sonnet-4-20250514"
-  openai_model: "gpt-4.1"
-  max_tokens: 4096
+  slow_mo: 200
 
 output:
   screenshots_dir: "output/screenshots"
   dom_snapshots_dir: "output/dom_snapshots"
   reports_dir: "output/reports"
-  vue_project_dir: "output/vue_project"
+  artifacts_dir: "output/artifacts"

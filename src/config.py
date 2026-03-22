@@ -1,10 +1,10 @@
-"""Configuration loader for Frontend Mimic."""
+"""Configuration loader for Frontend Mimic Agent."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -31,78 +31,74 @@ class LoginConfig(BaseModel):
         "button[type='submit'], button:has-text('Login'), button:has-text('Sign in'), "
         "button:has-text('登录'), button:has-text('Log in')"
     )
-    success_indicator: str = ""  # Optional selector that appears after successful login
+    success_indicator: str = ""
 
 
 class CrawlConfig(BaseModel):
-    max_depth: int = 2
-    max_pages: int = 50
     wait_after_navigation: int = 3000
-    wait_for_spa: int = 2000  # Extra wait for SPA rendering after navigation
+    wait_for_spa: int = 2000
+    interaction_timeout: int = 10000
+    max_interaction_items: int = 5
     exclude_patterns: list[str] = Field(default_factory=lambda: ["/logout", "/api/", ".pdf", ".zip"])
-    interaction_timeout: int = 10000  # Timeout for interaction clicks (ms)
-    max_interaction_items: int = 5  # Max dropdown items to click per action button
-    retry_failed: int = 1  # Number of retries for failed pages
+
+
+class BudgetConfig(BaseModel):
+    max_states: int = 100
+    max_depth: int = 5
+    retry_limit: int = 2
+    novelty_threshold: float = 0.3  # below this, skip deep analysis
+
+
+class ExplorationConfig(BaseModel):
+    """Controls what the agent explores and what it avoids."""
+    skip_patterns: list[str] = Field(default_factory=lambda: [
+        "/logout", "/api/", ".pdf", ".zip", "javascript:", "mailto:",
+    ])
+    destructive_keywords: list[str] = Field(default_factory=lambda: [
+        "删除", "delete", "remove", "drop", "destroy", "清空", "reset",
+    ])
+    # Candidate detection: which elements to consider as navigation targets
+    nav_selectors: list[str] = Field(default_factory=lambda: [
+        "a:has(> .el-menu-item)",           # Element Plus: <a href><li class="el-menu-item">
+        ".el-menu-item a[href]",            # Element Plus: <li><a href>
+        ".ant-menu-item > a[href]",         # Ant Design
+        ".ant-menu-item",                   # Ant Design (no child a)
+        "nav a[href]", ".sidebar a[href]", ".side-nav a[href]",
+    ])
 
 
 class InteractionConfig(BaseModel):
-    """Configurable selectors for deep interaction — adapt for different UI frameworks."""
-    # Action/operation button selectors (try these in order)
+    """Configurable selectors for deep interaction."""
     action_button_selectors: list[str] = Field(default_factory=lambda: [
-        "button:has-text('操作')",
-        "button:has-text('Actions')",
-        "button:has-text('Action')",
-        ".el-dropdown:has-text('操作') button",
-        ".ant-dropdown-trigger",
-        ".dropdown-toggle",
+        "button:has-text('操作')", "button:has-text('Actions')",
+        "button:has-text('Action')", ".el-dropdown:has-text('操作') button",
+        ".ant-dropdown-trigger", ".dropdown-toggle",
     ])
-    # Add/create button selectors
     add_button_selectors: list[str] = Field(default_factory=lambda: [
-        "button:has-text('添加')",
-        "button:has-text('新增')",
-        "button:has-text('Add')",
-        "button:has-text('Create')",
-        "button:has-text('New')",
+        "button:has-text('添加')", "button:has-text('新增')",
+        "button:has-text('Add')", "button:has-text('Create')", "button:has-text('New')",
     ])
-    # Dropdown menu item selector
     dropdown_item_selector: str = (
         ".el-dropdown-menu__item:visible, .ant-dropdown-menu-item:visible, "
         ".dropdown-item:visible, [role='menuitem']:visible"
     )
-    # Modal/dialog selectors
     modal_selectors: list[str] = Field(default_factory=lambda: [
-        ".el-dialog:visible",
-        ".el-drawer:visible",
-        ".ant-modal-wrap:visible",
-        ".modal.show",
-        "[role='dialog']:visible",
+        ".el-dialog:visible", ".el-drawer:visible",
+        ".ant-modal-wrap:visible", ".modal.show", "[role='dialog']:visible",
     ])
-    # Modal close selectors
     modal_close_selectors: list[str] = Field(default_factory=lambda: [
-        ".el-dialog__headerbtn",
-        ".el-drawer__close-btn",
-        ".ant-modal-close",
-        ".modal .btn-close",
-        "[aria-label='Close']",
-        ".el-icon--close",
+        ".el-dialog__headerbtn", ".el-drawer__close-btn",
+        ".ant-modal-close", ".modal .btn-close",
+        "[aria-label='Close']", ".el-icon--close",
     ])
-    # Overlay background selector
     overlay_selector: str = ".el-overlay, .ant-modal-mask, .modal-backdrop"
-    # Expand row selectors
     expand_selectors: list[str] = Field(default_factory=lambda: [
-        ".el-table__expand-icon",
-        ".ant-table-row-expand-icon",
-        "td.expand-icon",
+        ".el-table__expand-icon", ".ant-table-row-expand-icon", "td.expand-icon",
     ])
-    # Tab selectors
     tab_selector: str = (
         ".el-tabs__item:not(.is-active), .ant-tabs-tab:not(.ant-tabs-tab-active), "
         ".nav-link:not(.active)"
     )
-    # Destructive action keywords to skip
-    destructive_keywords: list[str] = Field(default_factory=lambda: [
-        "删除", "delete", "remove", "drop", "destroy", "清空", "reset",
-    ])
 
 
 class BrowserConfig(BaseModel):
@@ -112,27 +108,21 @@ class BrowserConfig(BaseModel):
     slow_mo: int = 500
 
 
-class AIConfig(BaseModel):
-    provider: Literal["claude", "openai", "both"] = "claude"
-    claude_model: str = "claude-sonnet-4-20250514"
-    openai_model: str = "gpt-4.1"
-    max_tokens: int = 4096
-
-
 class OutputConfig(BaseModel):
     screenshots_dir: str = "output/screenshots"
     dom_snapshots_dir: str = "output/dom_snapshots"
     reports_dir: str = "output/reports"
-    vue_project_dir: str = "output/vue_project"
+    artifacts_dir: str = "output/artifacts"
 
 
 class AppConfig(BaseModel):
     target: TargetConfig
     login: LoginConfig = Field(default_factory=LoginConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    exploration: ExplorationConfig = Field(default_factory=ExplorationConfig)
     interaction: InteractionConfig = Field(default_factory=InteractionConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
-    ai: AIConfig = Field(default_factory=AIConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
 
@@ -140,7 +130,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     """Load configuration from YAML file.
 
     Priority: settings.local.yaml > settings.yaml > defaults
-    Environment variables override: MIMIC_USERNAME, MIMIC_PASSWORD, ANTHROPIC_API_KEY, OPENAI_API_KEY
+    Environment variables override: MIMIC_USERNAME, MIMIC_PASSWORD
     """
     project_root = Path(__file__).parent.parent
     config_dir = project_root / "config"
@@ -162,7 +152,6 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
 
     config = AppConfig(**data)
 
-    # Environment variable overrides
     if env_user := os.environ.get("MIMIC_USERNAME"):
         config.login.username = env_user
     if env_pass := os.environ.get("MIMIC_PASSWORD"):
@@ -173,7 +162,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         config.output.screenshots_dir,
         config.output.dom_snapshots_dir,
         config.output.reports_dir,
-        config.output.vue_project_dir,
+        config.output.artifacts_dir,
     ]:
         try:
             (project_root / dir_path).mkdir(parents=True, exist_ok=True)

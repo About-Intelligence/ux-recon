@@ -4,21 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "frontend-mimic"
-version = "0.1.0"
-description = "AI-powered website frontend analyzer and replicator"
+version = "2.0.0"
+description = "Budget-aware browser agent for autonomous website exploration and UI analysis"
 requires-python = ">=3.11"
 dependencies = [
     "playwright>=1.40",
-    "anthropic>=0.40",
-    "openai>=1.50",
     "pydantic>=2.0",
-    "pydantic-settings>=2.0",
     "pyyaml>=6.0",
-    "aiofiles>=23.0",
     "rich>=13.0",
     "click>=8.0",
-    "Jinja2>=3.1",
-    "cssutils>=2.9",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
 ]
