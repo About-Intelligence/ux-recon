@@ -178,6 +178,9 @@ class AgentState:
         # Coverage tracking per page (target_id -> PageCoverage)
         self.coverage: dict[str, PageCoverage] = {}
 
+        # Track which URLs have been fully observed (candidates extracted)
+        self.observed_urls: set[str] = set()
+
         # Navigation stack for backtracking
         self.nav_stack: list[str] = []  # stack of state IDs
 
@@ -186,14 +189,39 @@ class AgentState:
 
     def _dedup_key(self, target: ExplorationTarget) -> str:
         """Generate a deduplication key for a target.
-        Same label+type or same href should not create duplicate targets."""
+        Same interaction on the same page should not create duplicate targets."""
         if target.target_type == TargetType.ROUTE:
-            # For routes, dedup by locator (URL/href) if it looks like a URL
             loc = target.locator
             if loc.startswith(("http", "#", "/")):
                 return f"route:{loc}"
-        # For everything else, dedup by type + label
-        return f"{target.target_type.value}:{target.label}"
+
+        # For interactions, find the parent route URL to dedup by page context
+        parent_route = self._find_parent_route_label(target)
+
+        if target.target_type == TargetType.DROPDOWN_ITEM:
+            # Dedup by item text + parent route (not by dropdown target ID)
+            item_text = target.metadata.get("item_text", target.label)
+            return f"dropdown_item:{item_text}@{parent_route}"
+
+        # For dropdowns, modals, tabs, expand rows: dedup by type + parent route
+        # Strip @target_xxxx from label to get the base label
+        import re
+        base_label = re.sub(r'@target_[a-f0-9]+', '', target.label)
+        return f"{target.target_type.value}:{base_label}@{parent_route}"
+
+    def _find_parent_route_label(self, target: ExplorationTarget) -> str:
+        """Walk up the parent chain to find the nearest route target's label."""
+        current_id = target.parent_id
+        visited: set[str] = set()
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            parent = self.targets.get(current_id)
+            if not parent:
+                break
+            if parent.target_type == TargetType.ROUTE:
+                return parent.label
+            current_id = parent.parent_id
+        return "root"
 
     def add_target(self, target: ExplorationTarget) -> bool:
         """Add a target to the registry and frontier if not already known. Returns True if new."""

@@ -179,9 +179,15 @@ class ExplorationEngine:
         self.state.phase = AgentPhase.OBSERVE
 
         page = self.controller.page
-        current_id = self.state.current_state_id
+        current_url = await self.controller.get_url()
         current_target = self.state.targets.get(self.state.current_target_id or "")
         current_depth = current_target.depth if current_target else 0
+
+        # Skip re-observation of already-observed URLs
+        normalized_url = self._normalize_url(current_url)
+        if normalized_url in self.state.observed_urls:
+            return
+        self.state.observed_urls.add(normalized_url)
 
         with self.logger.timed(AgentPhase.OBSERVE, "extract_candidates",
                                current_target.label if current_target else "root") as ctx:
