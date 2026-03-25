@@ -67,23 +67,33 @@ class PageCoverage:
     nav_items_explored: int = 0
     action_buttons_found: int = 0
     action_buttons_clicked: int = 0
+    action_buttons_skipped_novelty: int = 0
     dropdown_items_found: int = 0
     dropdown_items_explored: int = 0
+    dropdown_items_skipped_novelty: int = 0
     add_buttons_found: int = 0
     add_buttons_clicked: int = 0
+    add_buttons_skipped_novelty: int = 0
     tabs_found: int = 0
     tabs_switched: int = 0
+    tabs_skipped_novelty: int = 0
     expand_rows_found: int = 0
     expand_rows_expanded: int = 0
+    expand_rows_skipped_novelty: int = 0
     dropdown_item_labels: list[str] = field(default_factory=list)
     tab_labels: list[str] = field(default_factory=list)
 
     @property
     def has_unexplored(self) -> bool:
-        return (self.dropdown_items_found > self.dropdown_items_explored
-                or self.tabs_found > self.tabs_switched
-                or self.expand_rows_found > self.expand_rows_expanded
-                or self.add_buttons_found > self.add_buttons_clicked)
+        """True if there are items that were neither captured nor skipped by novelty."""
+        clicked_or_skipped_dd = self.dropdown_items_explored + self.dropdown_items_skipped_novelty
+        clicked_or_skipped_tabs = self.tabs_switched + self.tabs_skipped_novelty
+        clicked_or_skipped_expand = self.expand_rows_expanded + self.expand_rows_skipped_novelty
+        clicked_or_skipped_add = self.add_buttons_clicked + self.add_buttons_skipped_novelty
+        return (self.dropdown_items_found > clicked_or_skipped_dd
+                or self.tabs_found > clicked_or_skipped_tabs
+                or self.expand_rows_found > clicked_or_skipped_expand
+                or self.add_buttons_found > clicked_or_skipped_add)
 
 
 @dataclass

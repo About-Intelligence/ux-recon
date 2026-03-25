@@ -46,7 +46,7 @@ class BudgetConfig(BaseModel):
     max_states: int = 100
     max_depth: int = 5
     retry_limit: int = 2
-    novelty_threshold: float = 0.3  # below this, skip deep analysis
+    novelty_threshold: float = 0.12  # below this, skip capture entirely
 
 
 class ExplorationConfig(BaseModel):

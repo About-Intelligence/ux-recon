@@ -1,0 +1,36 @@
+# Local configuration example — copy to settings.local.yaml and fill in your values
+# Only include settings you want to override from settings.yaml
+
+target:
+  url: "https://your-website.com/login"
+  dashboard_url: "https://your-website.com/dashboard"  # URL after login (leave empty to auto-detect)
+
+login:
+  username: "your_username"
+  password: "your_password"
+  # Uncomment and modify if defaults don't match your site:
+  # username_selector: "input[type='text'], input[name='username']"
+  # password_selector: "input[type='password']"
+  # submit_selector: "button[type='submit'], button:has-text('Login')"
+
+# --- Optional overrides (defaults in settings.yaml are usually fine) ---
+
+# crawl:
+#   wait_after_navigation: 1500    # Increase for slow sites
+#   wait_for_spa: 1500             # Increase for heavy SPA rendering
+#   interaction_timeout: 3000      # Timeout for interaction clicks
+#   max_interaction_items: 5       # Max dropdown items to click per action button
+#   exclude_patterns:              # URL patterns to skip
+#     - "/logout"
+#     - "/api/"
+
+# budget:
+#   max_states: 100                # Total captures before stopping
+#   max_depth: 5                   # Max exploration depth
+#   novelty_threshold: 0.12       # 0.0-1.0, lower = capture more
+
+# browser:
+#   headless: false                # Set true for CI/server environments
+#   viewport_width: 1920
+#   viewport_height: 1080
+#   slow_mo: 200                   # ms between actions, reduce for speed

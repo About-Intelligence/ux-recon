@@ -115,22 +115,41 @@ class ReportGenerator:
                 lines.append(f"**{target.label}** (`{cov.page_url}`)")
                 if cov.action_buttons_found > 0:
                     lines.append(f"- Action buttons: {cov.action_buttons_found} found, {cov.action_buttons_clicked} clicked")
-                if cov.dropdown_items_found > cov.dropdown_items_explored:
+                if cov.dropdown_items_found > 0:
                     explored = cov.dropdown_items_explored
+                    skipped = cov.dropdown_items_skipped_novelty
                     found = cov.dropdown_items_found
-                    lines.append(f"- Dropdown items: {found} found, {explored} explored")
+                    parts = [f"{found} found", f"{explored} captured"]
+                    if skipped:
+                        parts.append(f"{skipped} skipped (similar)")
+                    lines.append(f"- Dropdown items: {', '.join(parts)}")
                     if cov.dropdown_item_labels:
                         for label in cov.dropdown_item_labels:
                             lines.append(f"  - `{label}`")
-                if cov.add_buttons_found > cov.add_buttons_clicked:
-                    lines.append(f"- Add/create buttons: {cov.add_buttons_found} found, {cov.add_buttons_clicked} clicked")
-                if cov.tabs_found > cov.tabs_switched:
-                    lines.append(f"- Tabs: {cov.tabs_found} found, {cov.tabs_switched} switched")
+                if cov.add_buttons_found > 0:
+                    clicked = cov.add_buttons_clicked
+                    skipped = cov.add_buttons_skipped_novelty
+                    parts = [f"{cov.add_buttons_found} found", f"{clicked} captured"]
+                    if skipped:
+                        parts.append(f"{skipped} skipped (similar)")
+                    lines.append(f"- Add/create buttons: {', '.join(parts)}")
+                if cov.tabs_found > 0:
+                    switched = cov.tabs_switched
+                    skipped = cov.tabs_skipped_novelty
+                    parts = [f"{cov.tabs_found} found", f"{switched} captured"]
+                    if skipped:
+                        parts.append(f"{skipped} skipped (similar)")
+                    lines.append(f"- Tabs: {', '.join(parts)}")
                     if cov.tab_labels:
                         for label in cov.tab_labels:
                             lines.append(f"  - `{label}`")
-                if cov.expand_rows_found > cov.expand_rows_expanded:
-                    lines.append(f"- Expandable rows: {cov.expand_rows_found} found, {cov.expand_rows_expanded} expanded")
+                if cov.expand_rows_found > 0:
+                    expanded = cov.expand_rows_expanded
+                    skipped = cov.expand_rows_skipped_novelty
+                    parts = [f"{cov.expand_rows_found} found", f"{expanded} captured"]
+                    if skipped:
+                        parts.append(f"{skipped} skipped (similar)")
+                    lines.append(f"- Expandable rows: {', '.join(parts)}")
                 lines.append("")
 
         # Summary stats

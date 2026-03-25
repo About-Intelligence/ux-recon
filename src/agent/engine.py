@@ -336,9 +336,11 @@ class ExplorationEngine:
 
                         # Capture the result
                         label = f"{item_text}@{route_label}"
-                        captured = await self._capture_interaction(label, route_target, "dropdown_item")
-                        if captured:
+                        result = await self._capture_interaction(label, route_target, "dropdown_item")
+                        if result == "captured":
                             coverage.dropdown_items_explored += 1
+                        elif result == "skipped_novelty":
+                            coverage.dropdown_items_skipped_novelty += 1
 
                         # Recover: close modal or go back
                         if await self.controller.is_modal_open():
@@ -369,9 +371,11 @@ class ExplorationEngine:
                 await self.controller.click_locator(add_loc.first, wait=wait)
 
                 label = f"add_form_{add_text}@{route_label}"
-                captured = await self._capture_interaction(label, route_target, "modal")
-                if captured:
+                result = await self._capture_interaction(label, route_target, "modal")
+                if result == "captured":
                     coverage.add_buttons_clicked += 1
+                elif result == "skipped_novelty":
+                    coverage.add_buttons_skipped_novelty += 1
 
                 await self.controller.close_overlays()
             except Exception as e:
@@ -387,9 +391,11 @@ class ExplorationEngine:
                 await self.controller.click_locator(expand_loc.first, wait=1.0)
 
                 label = f"expand_row@{route_label}"
-                captured = await self._capture_interaction(label, route_target, "expanded_row")
-                if captured:
+                result = await self._capture_interaction(label, route_target, "expanded_row")
+                if result == "captured":
                     coverage.expand_rows_expanded += 1
+                elif result == "skipped_novelty":
+                    coverage.expand_rows_skipped_novelty += 1
             except Exception:
                 pass
 
@@ -417,9 +423,11 @@ class ExplorationEngine:
                         await asyncio.sleep(wait)
 
                         label = f"tab_{tab_text}@{route_label}"
-                        captured = await self._capture_interaction(label, route_target, "tab_state")
-                        if captured:
+                        result = await self._capture_interaction(label, route_target, "tab_state")
+                        if result == "captured":
                             coverage.tabs_switched += 1
+                        elif result == "skipped_novelty":
+                            coverage.tabs_skipped_novelty += 1
                     except Exception:
                         continue
         except Exception:
@@ -430,10 +438,11 @@ class ExplorationEngine:
             self.state.coverage[route_target.id] = coverage
 
     async def _capture_interaction(self, label: str, parent_target: ExplorationTarget,
-                                    context: str) -> bool:
-        """Capture an interaction state with novelty check. Returns True if captured."""
+                                    context: str) -> str:
+        """Capture an interaction state with novelty check.
+        Returns: 'captured', 'skipped_novelty', or 'skipped_budget'."""
         if not self.state.has_budget():
-            return False
+            return "skipped_budget"
 
         # Novelty check
         html = await self.controller.get_html()
@@ -445,7 +454,7 @@ class ExplorationEngine:
             console.print(f"[dim]    Low novelty ({novelty:.2f}) — skipped[/dim]")
             self.logger.log(AgentPhase.EVAL_NOVELTY, "skip_interaction", label,
                           "skipped", f"novelty={novelty:.2f}")
-            return False
+            return "skipped_novelty"
 
         # Capture
         url = await self.controller.get_url()
@@ -474,7 +483,7 @@ class ExplorationEngine:
         self.logger.log(AgentPhase.EXECUTE, f"capture_{context}", label,
                       "success", f"novelty={novelty:.2f}")
         console.print(f"[green]    Captured: {url} (novelty={novelty:.2f})[/green]")
-        return True
+        return "captured"
 
     async def _phase_analyze(self, snapshot: StateSnapshot) -> None:
         """ANALYZE: Run local page analysis on the captured state."""

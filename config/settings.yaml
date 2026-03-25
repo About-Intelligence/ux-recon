@@ -28,7 +28,7 @@ budget:
   max_states: 100                         # Total states to capture before stopping
   max_depth: 5                            # Maximum exploration depth from root
   retry_limit: 2                          # Max retries per failed target
-  novelty_threshold: 0.3                  # Below this, skip deep analysis (0.0-1.0)
+  novelty_threshold: 0.12                 # Below this, skip capture entirely (0.0-1.0)
 
 exploration:
   skip_patterns:                          # URL/label patterns to skip
