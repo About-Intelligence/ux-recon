@@ -10,6 +10,10 @@ venv/
 # Output (generated data)
 output/
 output_backup/
+output_dataset/
+
+# Site-specific scripts
+scripts/
 
 # Secrets
 .env
