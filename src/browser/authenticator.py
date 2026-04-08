@@ -26,8 +26,8 @@ class Authenticator:
         page = self.controller.page
 
         if not cfg.username or not cfg.password:
-            console.print("[red]No credentials configured[/red]")
-            return False
+            console.print("[yellow]No credentials configured, proceeding without login[/yellow]")
+            return await self.controller.goto(self.config.target.url, timeout=60000)
 
         # Navigate to login page (with retry)
         reached = False
@@ -82,10 +82,14 @@ class Authenticator:
 
     async def check_session(self) -> bool:
         """Check if we're still logged in (not redirected to login)."""
+        if not self.config.login.username or not self.config.login.password:
+            return True
         url = await self.controller.get_url()
         return "login" not in url.lower() and "auth" not in url.lower()
 
     async def re_login(self) -> bool:
         """Re-authenticate if session expired."""
+        if not self.config.login.username or not self.config.login.password:
+            return True
         console.print("[yellow]Re-authenticating...[/yellow]")
         return await self.login()

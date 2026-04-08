@@ -229,3 +229,51 @@ class BrowserController:
             except Exception:
                 continue
         return False
+
+    async def detect_captcha_or_antibot(self) -> dict[str, Any]:
+        """Detect likely captcha or anti-bot challenges on the current page."""
+        selectors = [
+            "iframe[src*='recaptcha']",
+            ".g-recaptcha",
+            "#captcha",
+            "[id*='captcha']",
+            "[class*='captcha']",
+            "input[name*='captcha']",
+            "input[id*='captcha']",
+            "iframe[title*='challenge']",
+            "#cf-challenge-running",
+            "[data-testid*='captcha']",
+        ]
+
+        visible_selectors: list[str] = []
+        for selector in selectors:
+            try:
+                locator = self.page.locator(selector).first
+                if await locator.is_visible():
+                    visible_selectors.append(selector)
+            except Exception:
+                continue
+
+        text_matches = await self.evaluate("""
+            () => {
+                const text = (document.body?.innerText || '').toLowerCase();
+                const phrases = [
+                    'captcha',
+                    'verify you are human',
+                    'verification required',
+                    'unusual traffic',
+                    'press and hold',
+                    'cloudflare',
+                    'are you human',
+                    'security check'
+                ];
+                return phrases.filter((phrase) => text.includes(phrase));
+            }
+        """, default=[])
+
+        detected = bool(visible_selectors or text_matches)
+        return {
+            "detected": detected,
+            "selector_matches": visible_selectors,
+            "text_matches": text_matches or [],
+        }

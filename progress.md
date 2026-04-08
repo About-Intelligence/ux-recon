@@ -31,7 +31,6 @@
 - Defined the new positioning:
   - better for evidence-backed competitive analysis
   - not necessarily better for all browser automation
-- Wrote `COMPETITIVE_ANALYSIS_IMPLEMENTATION_PLAN.md`
 - Added two future skill candidates to the plan:
   - `competitive-analysis-review`
   - `browser-agent-benchmark`
@@ -83,8 +82,95 @@
   - adding `capture_label` / `capture_context` to extraction outputs
   - making interaction extraction use DOM-only page understanding to avoid redundant multimodal calls
 - Re-verified the codebase compiles with `python -m compileall src`
+- Added `LEADER_DISCUSSION_BRIEF.md` as a discussion-ready project brief covering:
+  - architecture layers
+  - state-machine flow
+  - current implementation status
+  - API dependencies, especially vision provider requirements
+  - open risks and recommended next steps
+- Rewrote `LEADER_DISCUSSION_BRIEF.md` into a shorter leader-facing version:
+  - compressed the early framing sections
+  - reduced engineering-detail density
+  - emphasized end-to-end target workflow, API dependency notes, current status, and next steps
+- Added an optional final-report LLM synthesis layer:
+  - new `synthesis` config section
+  - OpenAI-compatible synthesis client
+  - synthesis prompts
+  - deterministic `competitive_analysis_structured.md`
+  - optional LLM-authored `competitive_analysis.md`
+- Rewrote `DISCUSSION_BRIEF.md` to reflect the updated position:
+  - `DOM-grounded, vision-augmented` instead of rigid `DOM-first`
+  - repeated page understanding as a future direction
+  - deterministic analysis plus optional LLM synthesis as the report model
+- Synced with project leadership and recorded a major direction shift:
+  - the current DOM-first / route-first mode is not sufficient
+  - the project now needs to evolve toward a more general browser agent
+  - expected targets may include registration-first LLM experience sites and ad-platform websites
+  - captcha / anti-bot handling is now an expected concern
+  - a live smoke test with the newly obtained API key is now a near-term priority
+- Started the first code-level pivot from pipeline to agent loop:
+  - added `task` configuration for goal, registration-flow allowance, and captcha policy
+  - introduced `ActionDecision` as a generic next-step planning object
+  - refactored the main engine loop from direct route selection into `observe -> decide -> execute`
+  - kept current route execution behavior intact as a transition step
+- Extended that first pivot with runtime behavior changes:
+  - added repeated page understanding after route capture and key interaction captures
+  - added first-pass captcha / anti-bot detection in the browser controller
+  - added pause-and-report behavior driven by `task.captcha_policy`
+- Expanded the decision layer beyond pure route traversal:
+  - added a runtime pending-decision queue
+  - page observation now plans page-level actions
+  - current planned actions include non-active tabs, add/create buttons, and onboarding/auth-style primary CTAs
+  - the agent loop now prioritizes pending page actions before falling back to route frontier navigation
+- Added a first-pass form action for broader onboarding flows:
+  - detects visible auth/onboarding forms
+  - heuristically fills visible inputs from task/login profile values
+  - submits the form and captures the resulting state
+- Rewrote `DISCUSSION_BRIEF.md` around the new direction:
+  - pipeline -> agent loop
+  - broader target websites
+  - DOM as grounding, not sole control logic
+  - captcha and human-in-the-loop as first-class concerns
+- Updated README language to reflect the ongoing shift toward a general browser agent
+- Reviewed `web-access` as an agent-design reference and decided to keep Playwright while borrowing higher-level control ideas instead of replacing the browser layer
+- Added explicit borrow points into the planning files:
+  - goal-driven action selection
+  - validate-after-action execution
+  - lightweight site memory
+  - challenge-as-state handling
+- Implemented those borrow points in the runtime:
+  - new task config for `goal_keywords`, `use_site_memory`, and `validate_action_outcomes`
+  - pending decisions are now scored against task goals and in-run domain memory instead of pure FIFO
+  - click and submit actions now validate that they caused meaningful state change
+  - the engine now records per-domain site memory and saves it as `site_memory.json`
+- Consolidated direction and implementation guidance into `DISCUSSION_BRIEF.md`
+- Added a safe local config scaffold at `config/settings.local.yaml` so local testing can be enabled without storing secrets in versioned defaults
+- Added `SMOKE_TEST.md` as the first live-validation runbook
+- Updated local testing defaults in `config/settings.local.yaml` to:
+  - `vision.model = gpt-5.4`
+  - `synthesis.model = gpt-5.4`
+- Updated the authenticator so public websites without credentials can be used for the first smoke test:
+  - no-credential mode now navigates directly to the target URL
+  - session checks and re-login no longer block public-site runs
+- Added `config/smoke_test_public.yaml` for the first public-site live validation run using `python.org`
+- Installed Playwright Chromium through the local Clash proxy on `127.0.0.1:7890`
+- Completed the first real end-to-end smoke test against `https://www.python.org/`
+  - browser launch succeeded
+  - no-login mode succeeded
+  - vision-enabled observation succeeded
+  - 8 states were captured under budget
+  - final artifacts were generated successfully
+- The smoke test surfaced the next important quality gap:
+  - heuristics are still too admin-biased for general public websites
+  - category guess, page typing, and framework inference need a broader website taxonomy
+- Implemented a broader public-site taxonomy and reduced admin bias:
+  - added `landing`, `content`, `docs`, and `auth`-aware classification paths
+  - made framework/UI-library inference more conservative
+  - added flexible normalization for loosely structured vision model outputs
+- Standardized the runtime model choice on `gpt-5.4` for vision and synthesis
+- Removed one-off vision-model probing and comparison code to keep the runtime path focused
 
 ## Next Up
-- Live-validate the vision provider path with a configured API key
-- Improve reranking and page-type heuristics using actual vision output
-- Validate end-to-end output quality on a representative admin/SaaS target
+- Reframe the technical plan around a general browser-agent loop
+- Live-validate the API path on a simple public website
+- Define next-step handling for onboarding, registration, and anti-bot flows

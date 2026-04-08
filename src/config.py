@@ -34,6 +34,24 @@ class LoginConfig(BaseModel):
     success_indicator: str = ""
 
 
+class TaskConfig(BaseModel):
+    goal: str = "Explore the target website and understand its product surfaces."
+    goal_keywords: list[str] = Field(default_factory=list)
+    allow_registration_flows: bool = True
+    allow_login_flows: bool = True
+    captcha_policy: str = "pause_and_report"
+    human_assistance_allowed: bool = True
+    use_site_memory: bool = True
+    validate_action_outcomes: bool = True
+    reobserve_on_state_change: bool = True
+    use_vision_on_state_change: bool = True
+    max_reobservations_per_run: int = 30
+    profile_name: str = "Test User"
+    profile_email: str = "test@example.com"
+    profile_password: str = "TestPassword123!"
+    profile_company: str = "Example Inc"
+
+
 class CrawlConfig(BaseModel):
     wait_after_navigation: int = 3000
     wait_for_spa: int = 2000
@@ -131,13 +149,25 @@ class BrowserConfig(BaseModel):
 class VisionConfig(BaseModel):
     enabled: bool = False
     provider: str = "openai"
-    model: str = "gpt-4.1-mini"
+    model: str = "gpt-5.4"
     api_base_url: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
     timeout_ms: int = 15000
     max_image_side: int = 1440
     artifact_dir: str = "vision"
     page_insights_dir: str = "page_insights"
+
+
+class SynthesisConfig(BaseModel):
+    enabled: bool = False
+    provider: str = "openai"
+    model: str = "gpt-4.1-mini"
+    api_base_url: str = "https://api.openai.com/v1"
+    api_key_env: str = "OPENAI_API_KEY"
+    timeout_ms: int = 20000
+    artifact_filename_json: str = "competitive_analysis_llm.json"
+    artifact_filename_md: str = "competitive_analysis.md"
+    structured_report_filename_md: str = "competitive_analysis_structured.md"
 
 
 class OutputConfig(BaseModel):
@@ -149,6 +179,7 @@ class OutputConfig(BaseModel):
 
 class AppConfig(BaseModel):
     target: TargetConfig
+    task: TaskConfig = Field(default_factory=TaskConfig)
     login: LoginConfig = Field(default_factory=LoginConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
@@ -156,6 +187,7 @@ class AppConfig(BaseModel):
     interaction: InteractionConfig = Field(default_factory=InteractionConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     vision: VisionConfig = Field(default_factory=VisionConfig)
+    synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
 

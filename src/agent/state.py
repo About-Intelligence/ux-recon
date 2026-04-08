@@ -33,12 +33,24 @@ class VisitStatus(str, Enum):
 class ActionType(str, Enum):
     NAVIGATE = "navigate"
     CLICK_ACTION = "click_action"
+    FILL_AND_SUBMIT_FORM = "fill_and_submit_form"
     CLICK_DROPDOWN_ITEM = "click_dropdown_item"
     OPEN_MODAL = "open_modal"
     EXPAND_ROW = "expand_row"
     SWITCH_TAB = "switch_tab"
     SCROLL = "scroll"
     BACKTRACK = "backtrack"
+
+
+@dataclass
+class ActionDecision:
+    """A planned next action in the agent loop."""
+    action_type: ActionType
+    target_id: str | None = None
+    label: str = ""
+    reason: str = ""
+    dedup_key: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class TargetType(str, Enum):
@@ -163,11 +175,13 @@ class AgentState:
 
         # Frontier (BFS queue of target IDs)
         self.frontier: deque[str] = deque()
+        self.pending_decisions: deque[ActionDecision] = deque()
 
         # Tracking sets
         self.visited: set[str] = set()  # target IDs processed
         self.skipped: set[str] = set()  # target IDs skipped (low novelty / budget)
         self.failed: dict[str, int] = {}  # target_id -> retry count
+        self.executed_action_keys: set[str] = set()
 
         # Registries
         self.targets: dict[str, ExplorationTarget] = {}
@@ -259,6 +273,35 @@ class AgentState:
                 return self.targets.get(target_id)
         return None
 
+    def add_decision(self, decision: ActionDecision) -> bool:
+        """Add a planned decision if it has not already been executed or queued."""
+        key = decision.dedup_key or f"{decision.action_type.value}:{decision.label}:{decision.target_id}"
+        if key in self.executed_action_keys:
+            return False
+        if any((d.dedup_key or f"{d.action_type.value}:{d.label}:{d.target_id}") == key for d in self.pending_decisions):
+            return False
+        decision.dedup_key = key
+        self.pending_decisions.append(decision)
+        return True
+
+    def add_decisions(self, decisions: list[ActionDecision]) -> int:
+        """Add multiple decisions. Returns count of newly added."""
+        return sum(1 for d in decisions if self.add_decision(d))
+
+    def pop_decision(self) -> ActionDecision | None:
+        """Pop next pending decision."""
+        while self.pending_decisions:
+            decision = self.pending_decisions.popleft()
+            key = decision.dedup_key or f"{decision.action_type.value}:{decision.label}:{decision.target_id}"
+            if key not in self.executed_action_keys:
+                return decision
+        return None
+
+    def mark_decision_executed(self, decision: ActionDecision) -> None:
+        """Record that a decision was executed."""
+        key = decision.dedup_key or f"{decision.action_type.value}:{decision.label}:{decision.target_id}"
+        self.executed_action_keys.add(key)
+
     def mark_visited(self, target_id: str) -> None:
         self.visited.add(target_id)
 
@@ -311,6 +354,7 @@ class AgentState:
             "skipped": len(self.skipped),
             "failed": len(self.failed),
             "frontier_remaining": len(self.frontier),
+            "pending_decisions": len(self.pending_decisions),
             "states_captured": len(self.states),
             "budget_used": self.budget_total - self.budget_remaining,
             "budget_remaining": self.budget_remaining,

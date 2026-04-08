@@ -1,16 +1,16 @@
-# Task Plan: Competitive Analysis Frontend Recon Agent
+# Task Plan: General Browser Agent Pivot
 
 ## Goal
-Evolve `frontend_recon_agent` from a deterministic website exploration framework into a competitive-analysis pipeline that can:
+Evolve `frontend_recon_agent` from a deterministic exploration framework into a more general browser agent that can:
 
-- accept a target URL and competitive-analysis intent
-- explore and capture the site with evidence
-- use vision-assisted page understanding during observation
-- extract structured data from key page types
-- generate reusable competitive-analysis artifacts and reports
+- accept a target URL and high-level task intent
+- complete multi-step website onboarding flows such as registration and guided entry
+- browse and understand product surfaces across a broader range of websites, not only admin dashboards
+- handle more dynamic flows with repeated page understanding and step-by-step control
+- preserve evidence and structured outputs for downstream competitive analysis when useful
 
 ## Current Phase
-Phase 7 - Validation and quality hardening
+Phase 8 - General browser-agent pivot and live validation
 
 ## Phases
 
@@ -28,7 +28,7 @@ Phase 7 - Validation and quality hardening
 - **Status:** complete
 
 ### Phase 2: Planning and Implementation Breakdown
-- [x] Create a concrete implementation breakdown in `COMPETITIVE_ANALYSIS_IMPLEMENTATION_PLAN.md`
+- [x] Create and maintain a single combined direction + implementation document in `DISCUSSION_BRIEF.md`
 - [x] Record vision-augmented discovery as the first major increment
 - [x] Record two future skill candidates:
   - `competitive-analysis-review`
@@ -65,6 +65,7 @@ Phase 7 - Validation and quality hardening
 - [x] Add `competitive_analysis.md`
 - [x] Aggregate evidence-backed feature, entity, and workflow findings
 - [x] Ensure the report is readable without raw log inspection
+- [x] Add optional LLM synthesis layer for the final competitive-analysis report
 - **Status:** complete
 
 ### Phase 7: Validation and Demo Readiness
@@ -80,4 +81,20 @@ Phase 7 - Validation and quality hardening
 - [ ] Verify the system degrades gracefully when vision API fails
 - [ ] Test on at least one representative admin/SaaS target
 - [ ] Confirm final output is stronger than a generic browser-agent transcript for competitive analysis
+- **Status:** in_progress
+
+### Phase 8: General Browser-Agent Pivot
+- [ ] Reframe system from `DOM-grounded competitive-analysis pipeline` to `general browser agent with evidence outputs`
+- [x] Record borrow points from `web-access` while keeping Playwright as the browser runtime
+- [x] Add goal-driven decision prioritization instead of pure FIFO step execution
+- [x] Add validate-after-action checks so clicks and submits must show meaningful state change
+- [x] Add first-pass site memory so the run can remember what works on the current domain
+- [x] Reduce reliance on route-first DOM discovery as the only decision source by adding page-level decision planning
+- [x] Design repeated page-understanding / re-observation triggers after key state changes
+- [x] Add first-pass support for broader end-to-end flows such as form fill and submit
+- [x] Define first-pass approach for captcha / anti-bot detection and pause-and-report handling
+- [x] Select a simple public website for first live API smoke test
+- [x] Add a smoke-test runbook for the first live validation pass
+- [x] Run a minimal external smoke test with the newly obtained API key
+- [x] Standardize `vision.model` to `gpt-5.4`
 - **Status:** in_progress

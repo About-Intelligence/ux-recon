@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -12,7 +13,7 @@ from rich.panel import Panel
 
 from src.config import AppConfig
 from src.agent.state import (
-    AgentPhase, AgentState, ExplorationTarget, StateSnapshot,
+    AgentPhase, AgentState, ExplorationTarget, StateSnapshot, ActionDecision,
     ActionType, TargetType, VisitStatus, PageCoverage,
 )
 from src.agent.logger import RunLogger
@@ -23,6 +24,7 @@ from src.observer.fingerprint import DOMFingerprinter
 from src.observer.novelty import NoveltyScorer
 from src.analyzer.page_analyzer import PageAnalyzer
 from src.analysis.competitive_report import CompetitiveReportGenerator
+from src.analysis.synthesis_client import CompetitiveSynthesisClient
 from src.artifacts.manager import ArtifactManager
 from src.artifacts.inventory import InventoryGenerator
 from src.artifacts.sitemap import SitemapGenerator
@@ -53,6 +55,7 @@ class ExplorationEngine:
         self.novelty_scorer = NoveltyScorer(self.fingerprinter)
         self.analyzer = PageAnalyzer()
         self.competitive = CompetitiveReportGenerator()
+        self.synthesis = CompetitiveSynthesisClient(config.synthesis)
         self.artifacts = ArtifactManager(config)
         self.extraction = ExtractionEngine()
         self.vision = VisionClient(config.vision)
@@ -66,6 +69,22 @@ class ExplorationEngine:
         self._vision_results: dict[str, dict] = {}
         self._page_insights: dict[str, dict] = {}
         self._extraction_results: dict[str, dict] = {}
+        self._reobservation_count: int = 0
+        self._blocked_reason: str = ""
+        self._site_memory: dict[str, object] = {
+            "domain": urlparse(config.target.url).netloc,
+            "goal": config.task.goal,
+            "goal_keywords": config.task.goal_keywords,
+            "page_type_counts": {},
+            "selector_success": {},
+            "selector_failure": {},
+            "label_success": {},
+            "label_failure": {},
+            "action_type_success": {},
+            "action_type_failure": {},
+            "challenge_events": [],
+            "action_outcomes": [],
+        }
 
         # Timing
         self._start_time: str = ""
@@ -83,6 +102,7 @@ class ExplorationEngine:
         console.print(Panel.fit(
             f"[bold cyan]Frontend Mimic Agent[/bold cyan]\n"
             f"Target: {self.config.target.url}\n"
+            f"Goal: {self.config.task.goal}\n"
             f"Budget: {self.config.budget.max_states} states, depth {self.config.budget.max_depth}\n"
             f"Novelty threshold: {self.config.budget.novelty_threshold}",
             title="Agent Configuration",
@@ -110,34 +130,36 @@ class ExplorationEngine:
                 discovery_method="initial_page",
             )
             self.state.add_target(root_target)
+            self.state.current_target_id = root_target.id
 
-            # Main exploration loop — frontier contains ONLY route targets
+            # Main agent loop: observe -> decide -> act -> re-observe
             while True:
-                # OBSERVE current page (discover nav routes)
-                await self._phase_observe()
-
-                # SELECT next route from frontier
-                target = self._phase_select_action()
-                if target is None:
+                if self._blocked_reason:
+                    console.print(f"[yellow]Agent paused: {self._blocked_reason}[/yellow]")
                     break
 
-                # EXECUTE route navigation
-                snapshot = await self._execute_route(target)
+                await self._phase_observe()
+
+                decision = self._phase_decide_next_action()
+                if decision is None:
+                    break
+
+                snapshot = await self._execute_decision(decision)
                 if snapshot is None:
                     continue
 
-                # ANALYZE the route page
                 await self._phase_analyze(snapshot)
                 await self._run_extraction(
                     snapshot,
-                    capture_label=target.label or self._url_to_label(snapshot.url),
+                    capture_label=decision.label or self._url_to_label(snapshot.url),
                     capture_context="route",
                     allow_vision=True,
                 )
 
-                # EXPLORE all interactions on this page (inline, no frontier)
                 if self.state.has_budget():
-                    await self._explore_page_interactions(target)
+                    target = self.state.targets.get(snapshot.target_id)
+                    if target:
+                        await self._explore_page_interactions(target)
 
             # FINALIZE
             await self._phase_finalize()
@@ -201,6 +223,9 @@ class ExplorationEngine:
             return
         self.state.observed_urls.add(normalized_url)
 
+        if await self._handle_blocking_challenge(current_url, "observe"):
+            return
+
         with self.logger.timed(AgentPhase.OBSERVE, "extract_candidates",
                                current_target.label if current_target else "root") as ctx:
             candidates, coverage = await self.extractor.extract_all(
@@ -216,9 +241,11 @@ class ExplorationEngine:
 
             # Only add ROUTE targets to the frontier
             added = self.state.add_targets(route_candidates)
+            planned = await self._plan_page_actions(current_url)
+            decisions_added = self.state.add_decisions(planned)
             ctx["reason"] = (
                 f"found {len(route_candidates)} routes, {added} new, "
-                f"page_type={insight.page_type_vision}"
+                f"{decisions_added} actions, page_type={insight.page_type_vision}"
             )
 
             if current_target and current_target.id not in self.state.coverage:
@@ -227,8 +254,38 @@ class ExplorationEngine:
         if added > 0:
             console.print(f"[cyan]  Discovered {added} new routes (frontier: {len(self.state.frontier)})[/cyan]")
 
-    def _phase_select_action(self) -> ExplorationTarget | None:
-        """SELECT_ACTION: Pick next route from frontier, check budget."""
+    async def _handle_blocking_challenge(self, current_url: str, phase_label: str) -> bool:
+        """Detect captcha/anti-bot challenges and pause when configured to do so."""
+        challenge = await self.controller.detect_captcha_or_antibot()
+        if not challenge.get("detected"):
+            return False
+
+        reason = (
+            f"captcha_or_antibot_detected during {phase_label}: "
+            f"selectors={challenge.get('selector_matches', [])}, "
+            f"text={challenge.get('text_matches', [])}"
+        )
+        self.logger.log(AgentPhase.OBSERVE, "blocking_challenge", current_url, "failed", reason)
+        if self.config.task.use_site_memory:
+            challenge_events = self._site_memory["challenge_events"]
+            challenge_events.append({
+                "timestamp": datetime.now().isoformat(),
+                "url": current_url,
+                "phase": phase_label,
+                "selector_matches": challenge.get("selector_matches", []),
+                "text_matches": challenge.get("text_matches", []),
+            })
+            if len(challenge_events) > 50:
+                del challenge_events[:-50]
+
+        if self.config.task.captcha_policy == "ignore":
+            return False
+
+        self._blocked_reason = reason
+        return True
+
+    def _phase_decide_next_action(self) -> ActionDecision | None:
+        """SELECT_ACTION: Pick the next action in the agent loop."""
         self.state.phase = AgentPhase.SELECT_ACTION
 
         if not self.state.has_budget():
@@ -237,16 +294,192 @@ class ExplorationEngine:
             console.print("[yellow]Budget exhausted[/yellow]")
             return None
 
+        decision = self._select_best_pending_decision()
+        if decision is not None:
+            self.logger.log(
+                AgentPhase.SELECT_ACTION,
+                "selected_decision",
+                decision.label,
+                "success",
+                f"type={decision.action_type.value}, reason={decision.reason}",
+            )
+            return decision
+
         target = self.state.pop_frontier()
         if target is None:
             self.logger.log(AgentPhase.SELECT_ACTION, "frontier_empty", "", "success",
-                          "no more routes to explore")
+                          "no more routes or decisions to explore")
             console.print("[yellow]Frontier empty — exploration complete[/yellow]")
             return None
 
         self.logger.log(AgentPhase.SELECT_ACTION, "selected_target", target.label, "success",
                       f"type={target.target_type.value}, depth={target.depth}")
-        return target
+        return ActionDecision(
+            action_type=ActionType.NAVIGATE,
+            target_id=target.id,
+            label=target.label,
+            reason="selected next route from observed candidates",
+            metadata={"target_type": target.target_type.value, "depth": target.depth},
+        )
+
+    async def _execute_decision(self, decision: ActionDecision) -> StateSnapshot | None:
+        """Execute a planned decision from the agent loop."""
+        if decision.action_type == ActionType.NAVIGATE:
+            target = self.state.targets.get(decision.target_id or "")
+            if not target:
+                return None
+            snapshot = await self._execute_route(target)
+            if snapshot:
+                self.state.mark_decision_executed(decision)
+            return snapshot
+
+        if decision.action_type in {ActionType.SWITCH_TAB, ActionType.OPEN_MODAL, ActionType.CLICK_ACTION}:
+            snapshot = await self._execute_page_action_decision(decision)
+            if snapshot:
+                self.state.mark_decision_executed(decision)
+            return snapshot
+
+        if decision.action_type == ActionType.FILL_AND_SUBMIT_FORM:
+            snapshot = await self._execute_form_decision(decision)
+            if snapshot:
+                self.state.mark_decision_executed(decision)
+            return snapshot
+
+        self.logger.log(
+            AgentPhase.EXECUTE,
+            "unsupported_decision",
+            decision.label,
+            "skipped",
+            f"action_type={decision.action_type.value}",
+        )
+        return None
+
+    async def _execute_page_action_decision(self, decision: ActionDecision) -> StateSnapshot | None:
+        """Execute a page-level decision such as clicking a CTA, opening a modal, or switching a tab."""
+        current_target = self.state.targets.get(self.state.current_target_id or "")
+        if not current_target:
+            return None
+
+        selector = str(decision.metadata.get("selector", "")).strip()
+        index = int(decision.metadata.get("index", 0))
+        context = str(decision.metadata.get("context", "step_transition"))
+        wait_seconds = float(self.config.crawl.wait_after_navigation) / 1000
+
+        try:
+            before = await self._capture_runtime_signature()
+            locator = self.controller.page.locator(selector)
+            count = await locator.count()
+            if count <= index:
+                self._remember_action_outcome(decision, False, "selector_index_out_of_range")
+                return None
+            candidate = locator.nth(index)
+            if not await candidate.is_visible():
+                self._remember_action_outcome(decision, False, "target_not_visible")
+                return None
+            if not await self.controller.click_locator(candidate, wait=wait_seconds):
+                self._remember_action_outcome(decision, False, "click_failed")
+                return None
+            after = await self._capture_runtime_signature()
+            if self.config.task.validate_action_outcomes and not self._state_changed_meaningfully(before, after):
+                self.logger.log(
+                    AgentPhase.EXECUTE,
+                    "page_action_no_effect",
+                    decision.label,
+                    "failed",
+                    "no meaningful state change detected",
+                )
+                self._remember_action_outcome(decision, False, "no_state_change")
+                return None
+
+            result = await self._capture_interaction(decision.label, current_target, context)
+            if result == "captured":
+                self._remember_action_outcome(decision, True, "captured")
+            elif result == "skipped_novelty":
+                self._remember_action_outcome(decision, True, "state_changed_low_novelty")
+            else:
+                self._remember_action_outcome(decision, False, result)
+            if result != "captured":
+                return None
+            current_state_id = self.state.current_state_id or ""
+            return self.state.states.get(current_state_id)
+        except Exception as e:
+            self.logger.log(
+                AgentPhase.EXECUTE,
+                "page_action_failed",
+                decision.label,
+                "failed",
+                str(e),
+            )
+            self._remember_action_outcome(decision, False, str(e))
+            return None
+
+    async def _execute_form_decision(self, decision: ActionDecision) -> StateSnapshot | None:
+        """Fill a visible form heuristically and submit it."""
+        current_target = self.state.targets.get(self.state.current_target_id or "")
+        if not current_target:
+            return None
+
+        try:
+            before = await self._capture_runtime_signature()
+            filled_count = await self._fill_visible_form_fields()
+            submit_selector = str(decision.metadata.get("submit_selector", "button[type='submit'], button, [role='button']"))
+            submit_index = int(decision.metadata.get("submit_index", 0))
+            submit_locator = self.controller.page.locator(submit_selector)
+            submit_count = await submit_locator.count()
+            if submit_count <= submit_index:
+                self._remember_action_outcome(decision, False, "submit_index_out_of_range")
+                return None
+            button = submit_locator.nth(submit_index)
+            if not await button.is_visible():
+                self._remember_action_outcome(decision, False, "submit_not_visible")
+                return None
+            if not await self.controller.click_locator(button, wait=self.config.crawl.wait_after_navigation / 1000):
+                self._remember_action_outcome(decision, False, "submit_click_failed")
+                return None
+            after = await self._capture_runtime_signature()
+            if self.config.task.validate_action_outcomes and not self._state_changed_meaningfully(before, after):
+                self.logger.log(
+                    AgentPhase.EXECUTE,
+                    "form_submit_no_effect",
+                    decision.label,
+                    "failed",
+                    "no meaningful state change detected",
+                )
+                self._remember_action_outcome(decision, False, "no_state_change")
+                return None
+
+            result = await self._capture_interaction(
+                decision.label or "form_submit",
+                current_target,
+                "form_submit",
+            )
+            if result == "captured":
+                self._remember_action_outcome(decision, True, f"captured; filled_fields={filled_count}")
+            elif result == "skipped_novelty":
+                self._remember_action_outcome(decision, True, f"state_changed_low_novelty; filled_fields={filled_count}")
+            else:
+                self._remember_action_outcome(decision, False, f"{result}; filled_fields={filled_count}")
+            if result != "captured":
+                return None
+            current_state_id = self.state.current_state_id or ""
+            self.logger.log(
+                AgentPhase.EXECUTE,
+                "form_submitted",
+                decision.label,
+                "success",
+                f"filled_fields={filled_count}",
+            )
+            return self.state.states.get(current_state_id)
+        except Exception as e:
+            self.logger.log(
+                AgentPhase.EXECUTE,
+                "form_submit_failed",
+                decision.label,
+                "failed",
+                str(e),
+            )
+            self._remember_action_outcome(decision, False, str(e))
+            return None
 
     async def _execute_route(self, target: ExplorationTarget) -> StateSnapshot | None:
         """Navigate to a route and capture it. Routes are always captured."""
@@ -272,6 +505,16 @@ class ExplorationEngine:
 
         if not success:
             self.state.mark_failed(target.id)
+            self._remember_action_outcome(
+                ActionDecision(
+                    action_type=ActionType.NAVIGATE,
+                    target_id=target.id,
+                    label=target.label,
+                    metadata={"selector": target.locator, "context": "route"},
+                ),
+                False,
+                "navigation_failed",
+            )
             return None
 
         # Check session
@@ -281,6 +524,25 @@ class ExplorationEngine:
 
         # Routes are ALWAYS captured
         snapshot = await self._capture_and_register(target)
+        if snapshot:
+            self._remember_action_outcome(
+                ActionDecision(
+                    action_type=ActionType.NAVIGATE,
+                    target_id=target.id,
+                    label=target.label,
+                    metadata={"selector": target.locator, "context": "route"},
+                ),
+                True,
+                "captured_route",
+            )
+        if snapshot and self.config.task.reobserve_on_state_change:
+            await self._reobserve_current_state(
+                state_id=snapshot.id,
+                current_url=snapshot.url,
+                reason="route_capture",
+                allow_vision=True,
+                discover_candidates=False,
+            )
         return snapshot
 
     async def _explore_page_interactions(self, route_target: ExplorationTarget) -> None:
@@ -501,16 +763,26 @@ class ExplorationEngine:
         self.state.consume_budget()
         self.novelty_scorer.register(html, fingerprint)
 
+        self.state.current_state_id = snapshot.id
+
         # Analyze
         computed_styles = await self.controller.get_computed_styles()
         analysis = self.analyzer.analyze(html, computed_styles)
         self._analysis_results[snapshot.id] = analysis
         self.artifacts.save_analysis(snapshot.id, analysis)
+        if self.config.task.reobserve_on_state_change:
+            await self._reobserve_current_state(
+                state_id=snapshot.id,
+                current_url=url,
+                reason=context,
+                allow_vision=self.config.task.use_vision_on_state_change,
+                discover_candidates=False,
+            )
         await self._run_extraction(
             snapshot,
             capture_label=label,
             capture_context=context,
-            allow_vision=False,
+            allow_vision=self.config.task.use_vision_on_state_change,
         )
 
         self.logger.log(AgentPhase.EXECUTE, f"capture_{context}", label,
@@ -619,6 +891,10 @@ class ExplorationEngine:
             pages_with_gaps = sum(1 for c in self.state.coverage.values() if c.has_unexplored)
             ctx["reason"] = f"{len(coverage_data)} pages, {pages_with_gaps} with gaps → {path.name}"
 
+        with self.logger.timed(AgentPhase.FINALIZE, "generate_site_memory") as ctx:
+            path = self.artifacts.save_json("site_memory.json", self._site_memory)
+            ctx["reason"] = f"site memory → {path.name}"
+
         with self.logger.timed(AgentPhase.FINALIZE, "generate_extraction_artifacts") as ctx:
             extraction_rows = list(self._extraction_results.values())
             summary = self._build_extraction_summary(extraction_rows)
@@ -654,10 +930,32 @@ class ExplorationEngine:
                 self._extraction_results,
             )
             self.artifacts.save_json("competitive_analysis.json", competitive.model_dump())
+            structured_markdown = self.competitive.generate_markdown(competitive)
             self.artifacts.save_text(
-                "competitive_analysis.md",
-                self.competitive.generate_markdown(competitive),
+                self.config.synthesis.structured_report_filename_md,
+                structured_markdown,
             )
+
+            synthesized = await self.synthesis.synthesize(
+                competitive.model_dump(),
+                self._page_insights,
+                self._extraction_results,
+            )
+            if self.config.synthesis.enabled:
+                self.artifacts.save_json(
+                    self.config.synthesis.artifact_filename_json,
+                    synthesized.model_dump(),
+                )
+            if self.config.synthesis.enabled and synthesized.markdown_report:
+                self.artifacts.save_text(
+                    self.config.synthesis.artifact_filename_md,
+                    synthesized.markdown_report,
+                )
+            else:
+                self.artifacts.save_text(
+                    self.config.synthesis.artifact_filename_md,
+                    structured_markdown,
+                )
             ctx["reason"] = (
                 f"category={competitive.competitive_summary.product_category_guess}, "
                 f"modules={len(competitive.feature_modules)}"
@@ -718,11 +1016,269 @@ class ExplorationEngine:
             self.logger.log(AgentPhase.OBSERVE, "vision_understanding", current_url, "failed", str(e))
             return VisionResult(notes=f"vision_failed: {e}")
 
+    async def _plan_page_actions(self, current_url: str) -> list[ActionDecision]:
+        """Plan page-level next actions from the current visible state."""
+        decisions: list[ActionDecision] = []
+        url_key = self._normalize_url(current_url)
+
+        # Non-active tabs
+        try:
+            tabs = self.controller.page.locator(self.config.interaction.tab_selector)
+            tab_count = await tabs.count()
+            for i in range(min(tab_count, 4)):
+                tab = tabs.nth(i)
+                if not await tab.is_visible():
+                    continue
+                label = (await tab.text_content() or "").strip() or f"tab_{i + 1}"
+                decisions.append(ActionDecision(
+                    action_type=ActionType.SWITCH_TAB,
+                    target_id=self.state.current_target_id,
+                    label=label,
+                    reason="visible non-active tab discovered",
+                    dedup_key=f"tab:{url_key}:{label}:{i}",
+                    metadata={
+                        "selector": self.config.interaction.tab_selector,
+                        "index": i,
+                        "context": "tab_state",
+                    },
+                ))
+        except Exception:
+            pass
+
+        # Add / create buttons
+        try:
+            for selector in self.config.interaction.add_button_selectors:
+                added_for_selector = False
+                locator = self.controller.page.locator(selector)
+                count = await locator.count()
+                for i in range(min(count, 2)):
+                    button = locator.nth(i)
+                    if not await button.is_visible():
+                        continue
+                    label = (await button.text_content() or "").strip() or f"add_{i + 1}"
+                    decisions.append(ActionDecision(
+                        action_type=ActionType.OPEN_MODAL,
+                        target_id=self.state.current_target_id,
+                        label=label,
+                        reason="visible add/create button discovered",
+                        dedup_key=f"modal:{url_key}:{label}:{selector}:{i}",
+                        metadata={
+                            "selector": selector,
+                            "index": i,
+                            "context": "modal",
+                        },
+                    ))
+                    added_for_selector = True
+                if added_for_selector:
+                    break
+        except Exception:
+            pass
+
+        # Generic primary CTA planning for onboarding-like flows
+        try:
+            cta_locator = self.controller.page.locator("button, a, [role='button']")
+            cta_count = await cta_locator.count()
+            keywords = (
+                "sign up", "register", "create account", "get started", "continue",
+                "next", "start", "try now", "login", "sign in"
+            )
+            for i in range(min(cta_count, 20)):
+                button = cta_locator.nth(i)
+                if not await button.is_visible():
+                    continue
+                text = " ".join(((await button.text_content()) or "").split()).strip()
+                lower = text.lower()
+                if not text or not any(keyword in lower for keyword in keywords):
+                    continue
+                decisions.append(ActionDecision(
+                    action_type=ActionType.CLICK_ACTION,
+                    target_id=self.state.current_target_id,
+                    label=text,
+                    reason="primary onboarding/auth CTA discovered",
+                    dedup_key=f"cta:{url_key}:{text}:{i}",
+                    metadata={
+                        "selector": "button, a, [role='button']",
+                        "index": i,
+                        "context": "step_transition",
+                    },
+                ))
+        except Exception:
+            pass
+
+        # Auth / onboarding forms
+        try:
+            form_decision = await self._plan_form_action(current_url)
+            if form_decision:
+                decisions.append(form_decision)
+        except Exception:
+            pass
+
+        return decisions
+
+    async def _plan_form_action(self, current_url: str) -> ActionDecision | None:
+        """Plan a generic form-fill action for login/signup/onboarding flows."""
+        inputs = self.controller.page.locator("input, textarea")
+        input_count = await inputs.count()
+        visible_count = 0
+        for i in range(min(input_count, 8)):
+            try:
+                if await inputs.nth(i).is_visible():
+                    visible_count += 1
+            except Exception:
+                continue
+        if visible_count == 0:
+            return None
+
+        buttons = self.controller.page.locator("button, [role='button'], input[type='submit']")
+        button_count = await buttons.count()
+        keywords = (
+            "sign up", "register", "create account", "continue", "next",
+            "submit", "finish", "complete", "login", "sign in", "join"
+        )
+        for i in range(min(button_count, 12)):
+            try:
+                button = buttons.nth(i)
+                if not await button.is_visible():
+                    continue
+                text = " ".join(((await button.text_content()) or "").split()).strip()
+                value_attr = (await button.get_attribute("value") or "").strip()
+                label = text or value_attr
+                if not label:
+                    continue
+                lower = label.lower()
+                if not any(keyword in lower for keyword in keywords):
+                    continue
+                return ActionDecision(
+                    action_type=ActionType.FILL_AND_SUBMIT_FORM,
+                    target_id=self.state.current_target_id,
+                    label=label,
+                    reason="visible auth/onboarding form with submit-like CTA",
+                    dedup_key=f"form:{self._normalize_url(current_url)}:{label}:{i}",
+                    metadata={
+                        "submit_selector": "button, [role='button'], input[type='submit']",
+                        "submit_index": i,
+                    },
+                )
+            except Exception:
+                continue
+        return None
+
+    async def _fill_visible_form_fields(self) -> int:
+        """Fill visible form fields with heuristic values from task/login config."""
+        inputs = self.controller.page.locator("input, textarea")
+        count = await inputs.count()
+        filled = 0
+
+        for i in range(min(count, 20)):
+            try:
+                field = inputs.nth(i)
+                if not await field.is_visible():
+                    continue
+                input_type = ((await field.get_attribute("type")) or "text").lower()
+                if input_type in {"hidden", "submit", "checkbox", "radio", "file"}:
+                    continue
+                current_value = (await field.input_value() or "").strip()
+                if current_value:
+                    continue
+
+                name_hint = " ".join(filter(None, [
+                    await field.get_attribute("name"),
+                    await field.get_attribute("id"),
+                    await field.get_attribute("placeholder"),
+                    await field.get_attribute("aria-label"),
+                    await field.get_attribute("autocomplete"),
+                ])).lower()
+
+                value = self._guess_form_value(name_hint, input_type)
+                if value is None:
+                    continue
+
+                await field.fill(value)
+                filled += 1
+            except Exception:
+                continue
+
+        return filled
+
+    def _guess_form_value(self, name_hint: str, input_type: str) -> str | None:
+        """Map a field hint to a reasonable task/login value."""
+        login_username = self.config.login.username or self.config.task.profile_email
+        login_password = self.config.login.password or self.config.task.profile_password
+
+        if input_type == "email" or any(key in name_hint for key in ["email", "e-mail"]):
+            return self.config.task.profile_email or login_username
+        if input_type == "password" or "password" in name_hint:
+            return login_password
+        if any(key in name_hint for key in ["user", "login", "account"]):
+            return login_username
+        if any(key in name_hint for key in ["name", "full name", "fullname"]):
+            return self.config.task.profile_name
+        if any(key in name_hint for key in ["company", "organization", "org", "business"]):
+            return self.config.task.profile_company
+        if any(key in name_hint for key in ["phone", "mobile", "tel"]):
+            return "13800138000"
+        if any(key in name_hint for key in ["code", "otp", "verification"]):
+            return None
+        if input_type in {"text", "search"}:
+            return self.config.task.profile_name
+        return None
+
+    async def _reobserve_current_state(
+        self,
+        state_id: str,
+        current_url: str,
+        reason: str,
+        allow_vision: bool,
+        discover_candidates: bool,
+    ) -> None:
+        """Refresh page understanding after a meaningful state change."""
+        if self._reobservation_count >= self.config.task.max_reobservations_per_run:
+            return
+        if await self._handle_blocking_challenge(current_url, f"reobserve:{reason}"):
+            return
+
+        self._reobservation_count += 1
+        dom_summary = await self._build_dom_summary()
+        vision_result = (
+            await self._understand_current_page(current_url, dom_summary)
+            if allow_vision else VisionResult()
+        )
+        insight = self._build_page_insight(
+            current_url,
+            dom_summary,
+            vision_result,
+            state_id=state_id,
+        )
+        self._persist_page_understanding(insight, vision_result)
+
+        if discover_candidates:
+            current_target = self.state.targets.get(self.state.current_target_id or "")
+            current_depth = current_target.depth if current_target else 0
+            candidates, _ = await self.extractor.extract_all(
+                self.controller.page, self.state.current_target_id, current_depth
+            )
+            route_candidates = self._rerank_route_candidates(
+                [c for c in candidates if c.target_type == TargetType.ROUTE],
+                vision_result,
+            )
+            self.state.add_targets(route_candidates)
+
+        planned = await self._plan_page_actions(current_url)
+        self.state.add_decisions(planned)
+
+        self.logger.log(
+            AgentPhase.OBSERVE,
+            "reobserve_state",
+            current_url,
+            "success",
+            f"reason={reason}, page_type={insight.page_type_vision or insight.page_type_dom}",
+        )
+
     def _rerank_route_candidates(self, route_candidates: list[ExplorationTarget],
                                  vision_result: VisionResult) -> list[ExplorationTarget]:
         """Rerank route candidates using page-type hints without changing executability."""
         page_type = vision_result.page_type
-        if page_type == "unknown" or not route_candidates:
+        if not route_candidates:
             return route_candidates
 
         def score(candidate: ExplorationTarget) -> tuple[int, int, str]:
@@ -732,6 +1288,15 @@ class ExplorationEngine:
             if page_type == "dashboard":
                 if any(term in label for term in ["list", "manage", "admin", "setting", "config", "user"]):
                     score_value += 3
+            elif page_type == "landing":
+                if any(term in label for term in ["about", "docs", "download", "community", "learn", "get started"]):
+                    score_value += 3
+            elif page_type == "docs":
+                if any(term in label for term in ["docs", "tutorial", "guide", "reference", "download", "about"]):
+                    score_value += 3
+            elif page_type == "content":
+                if any(term in label for term in ["about", "community", "blog", "events", "jobs", "news"]):
+                    score_value += 2
             elif page_type == "list":
                 if any(term in label for term in ["detail", "view", "record", "item"]):
                     score_value += 2
@@ -744,6 +1309,13 @@ class ExplorationEngine:
                 if any(term in label for term in ["create", "new", "edit", "config", "setting"]):
                     score_value += 2
 
+            for term in self._goal_terms():
+                if term in label or term in candidate.locator.lower():
+                    score_value += 3
+
+            score_value += int(self._site_memory["label_success"].get(label, 0))
+            score_value -= int(self._site_memory["label_failure"].get(label, 0))
+
             return (-score_value, candidate.depth, candidate.label)
 
         return sorted(route_candidates, key=score)
@@ -752,7 +1324,7 @@ class ExplorationEngine:
                             vision_result: VisionResult, state_id: str | None = None) -> PageInsight:
         """Build a merged page insight from DOM and vision understanding."""
         insight_state_id = state_id or self.state.current_state_id or f"observe_{self._url_to_label(current_url)}"
-        page_type_dom = self._infer_dom_page_type(dom_summary)
+        page_type_dom = self._infer_dom_page_type(current_url, dom_summary)
 
         return PageInsight(
             state_id=insight_state_id,
@@ -771,10 +1343,146 @@ class ExplorationEngine:
         """Persist page insight and optional vision output artifacts."""
         self._page_insights[insight.state_id] = insight.model_dump()
         self.artifacts.save_page_insight(insight.state_id, insight.model_dump())
+        self._remember_page_type(self._resolved_page_type(insight.model_dump()))
 
         if self.config.vision.enabled:
             self._vision_results[insight.state_id] = vision_result.model_dump()
             self.artifacts.save_vision(insight.state_id, vision_result.model_dump())
+
+    def _select_best_pending_decision(self) -> ActionDecision | None:
+        """Select the strongest pending decision using goal and memory signals."""
+        if not self.state.pending_decisions:
+            return None
+
+        indexed = list(enumerate(self.state.pending_decisions))
+        best_index, best_decision = max(
+            indexed,
+            key=lambda item: (self._score_decision(item[1]), -item[0]),
+        )
+        remaining = [
+            decision for idx, decision in indexed
+            if idx != best_index
+        ]
+        from collections import deque
+        self.state.pending_decisions = deque(remaining)
+        return best_decision
+
+    def _score_decision(self, decision: ActionDecision) -> int:
+        """Score a decision using goal-driven and memory-driven heuristics."""
+        score = 0
+        text = " ".join([
+            decision.label,
+            decision.reason,
+            str(decision.metadata.get("context", "")),
+        ]).lower()
+        selector = str(decision.metadata.get("selector", "")).strip()
+
+        for term in self._goal_terms():
+            if term in text:
+                score += 6
+
+        if decision.action_type == ActionType.FILL_AND_SUBMIT_FORM:
+            score += 5
+        elif decision.action_type == ActionType.CLICK_ACTION:
+            score += 3
+        elif decision.action_type == ActionType.OPEN_MODAL:
+            score += 2
+
+        if any(term in text for term in ["sign up", "register", "get started", "continue", "next"]):
+            score += 3
+        if any(term in text for term in ["login", "sign in"]):
+            score += 2
+
+        score += int(self._site_memory["selector_success"].get(selector, 0)) * 2
+        score -= int(self._site_memory["selector_failure"].get(selector, 0))
+        score += int(self._site_memory["label_success"].get(decision.label.lower(), 0))
+        score -= int(self._site_memory["label_failure"].get(decision.label.lower(), 0))
+        score += int(self._site_memory["action_type_success"].get(decision.action_type.value, 0))
+        score -= int(self._site_memory["action_type_failure"].get(decision.action_type.value, 0))
+        return score
+
+    def _goal_terms(self) -> list[str]:
+        """Build a compact list of goal terms for decision prioritization."""
+        terms: list[str] = []
+        explicit = [term.strip().lower() for term in self.config.task.goal_keywords if term.strip()]
+        terms.extend(explicit)
+        tokens = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]{2,}", self.config.task.goal.lower())
+        for token in tokens:
+            if token not in {"the", "and", "with", "that", "into", "from", "then", "after"}:
+                terms.append(token)
+        seen: set[str] = set()
+        unique_terms: list[str] = []
+        for term in terms:
+            if term not in seen:
+                seen.add(term)
+                unique_terms.append(term)
+        return unique_terms[:12]
+
+    async def _capture_runtime_signature(self) -> dict[str, str | bool]:
+        """Capture a lightweight runtime signature for action validation."""
+        url = await self.controller.get_url()
+        title = await self.controller.get_title()
+        html = await self.controller.get_html()
+        _, fingerprint = self.novelty_scorer.score(html)
+        modal_open = await self.controller.is_modal_open()
+        return {
+            "url": self._normalize_url(url),
+            "title": title,
+            "fingerprint": fingerprint,
+            "modal_open": modal_open,
+        }
+
+    def _state_changed_meaningfully(
+        self,
+        before: dict[str, str | bool],
+        after: dict[str, str | bool],
+    ) -> bool:
+        """Check whether an action changed the page state in a meaningful way."""
+        for key in ("url", "title", "fingerprint", "modal_open"):
+            if before.get(key) != after.get(key):
+                return True
+        return False
+
+    def _remember_page_type(self, page_type: str) -> None:
+        """Track page-type observations for this site."""
+        if not self.config.task.use_site_memory or not page_type:
+            return
+        counts = self._site_memory["page_type_counts"]
+        counts[page_type] = int(counts.get(page_type, 0)) + 1
+
+    def _remember_action_outcome(self, decision: ActionDecision, success: bool, reason: str) -> None:
+        """Track lightweight site memory about what tends to work on this domain."""
+        if not self.config.task.use_site_memory:
+            return
+
+        selector = str(decision.metadata.get("selector", "")).strip()
+        label = decision.label.lower().strip()
+        action_type = decision.action_type.value
+        outcome_key = "success" if success else "failure"
+
+        selector_bucket = self._site_memory[f"selector_{outcome_key}"]
+        if selector:
+            selector_bucket[selector] = int(selector_bucket.get(selector, 0)) + 1
+
+        label_bucket = self._site_memory[f"label_{outcome_key}"]
+        if label:
+            label_bucket[label] = int(label_bucket.get(label, 0)) + 1
+
+        action_bucket = self._site_memory[f"action_type_{outcome_key}"]
+        action_bucket[action_type] = int(action_bucket.get(action_type, 0)) + 1
+
+        outcomes = self._site_memory["action_outcomes"]
+        outcomes.append({
+            "timestamp": datetime.now().isoformat(),
+            "action_type": action_type,
+            "label": decision.label,
+            "selector": selector,
+            "context": decision.metadata.get("context", ""),
+            "success": success,
+            "reason": reason,
+        })
+        if len(outcomes) > 100:
+            del outcomes[:-100]
 
     async def _collect_visible_texts(self, selectors: list[str], limit: int) -> list[str]:
         """Collect visible text snippets for a list of selectors."""
@@ -812,12 +1520,38 @@ class ExplorationEngine:
         """Return True if a component type is present in analyzer output."""
         return component_name in analysis.get("component_types", [])
 
-    def _infer_dom_page_type(self, summary: DOMSummary) -> str:
+    def _infer_dom_page_type(self, current_url: str, summary: DOMSummary) -> str:
         """Infer a coarse page type from DOM summary only."""
         components = set(summary.component_types)
+        url_lower = current_url.lower()
+        title_lower = summary.title.lower()
+        nav_text = " ".join(summary.nav_labels).lower()
+        button_text = " ".join(summary.button_labels).lower()
+        tab_text = " ".join(summary.tab_labels).lower()
+        combined_text = " ".join([title_lower, nav_text, button_text, tab_text, url_lower])
+
         if summary.has_modal:
             return "modal"
-        if "table" in components:
+        parsed = urlparse(current_url)
+        normalized_root = f"{parsed.scheme}://{parsed.netloc}"
+        if current_url.rstrip("/") == normalized_root.rstrip("/"):
+            if not summary.has_form and not summary.has_pagination:
+                return "landing"
+            if "table" not in components:
+                return "landing"
+        if any(term in combined_text for term in [
+            "docs", "documentation", "tutorial", "reference", "guide", "devguide",
+        ]) and ("sidebar" in components or "navbar" in components or summary.nav_labels):
+            return "docs"
+        if any(term in combined_text for term in [
+            "community", "about", "events", "jobs", "blog", "news",
+        ]) and not summary.has_pagination:
+            return "content"
+        if summary.has_form and any(term in combined_text for term in [
+            "login", "log in", "sign in", "sign up", "register", "create account", "join",
+        ]):
+            return "auth"
+        if "table" in components and (summary.table_headers or summary.has_pagination):
             return "list"
         if "form" in components:
             return "form"
@@ -825,6 +1559,8 @@ class ExplorationEngine:
             return "detail"
         if "card" in components and "table" not in components and "form" not in components:
             return "dashboard"
+        if summary.nav_labels or summary.button_labels:
+            return "content"
         return "unknown"
 
     def _choose_extraction_strategy(self, page_type_dom: str, page_type_vision: str) -> str:
@@ -834,7 +1570,7 @@ class ExplorationEngine:
             return "list_table"
         if page_type == "detail":
             return "detail_fields"
-        if page_type in {"form", "modal"}:
+        if page_type in {"form", "modal", "auth"}:
             return "form_schema"
         return "unknown"
 
@@ -858,8 +1594,12 @@ class ExplorationEngine:
         tags: list[str] = []
         if summary.has_table:
             tags.append("data_dense")
-        if summary.has_form or vision_result.page_type in {"form", "modal"}:
+        if summary.has_form or vision_result.page_type in {"form", "modal", "auth"}:
             tags.append("configuration_surface")
+        if vision_result.page_type in {"landing", "content", "docs"}:
+            tags.append("content_surface")
+        if vision_result.page_type == "docs":
+            tags.append("documentation_surface")
         if any(region.region_type == "tabs" for region in vision_result.regions):
             tags.append("tabbed_workflow")
         if self._is_high_value_page(summary, vision_result):

@@ -34,6 +34,16 @@ class CompetitiveAnalysis(BaseModel):
     comparison_notes: list[str] = Field(default_factory=list)
 
 
+class CompetitiveSynthesis(BaseModel):
+    executive_summary: str = ""
+    product_positioning: list[str] = Field(default_factory=list)
+    key_workflows: list[str] = Field(default_factory=list)
+    differentiators: list[str] = Field(default_factory=list)
+    risks_and_unknowns: list[str] = Field(default_factory=list)
+    recommended_followups: list[str] = Field(default_factory=list)
+    markdown_report: str = ""
+
+
 class CompetitiveReportGenerator:
     """Aggregates artifacts into competitive-analysis outputs."""
 
@@ -207,7 +217,17 @@ class CompetitiveReportGenerator:
             if fragment_path:
                 return fragment_path
 
-        return parsed.path.strip("/") or "root"
+        path = parsed.path.strip("/")
+        if not path:
+            return "root"
+
+        parts = [part for part in path.split("/") if part]
+        if parts and parts[0].isdigit():
+            if len(parts) > 1:
+                return "/".join(parts[1:])
+            if parsed.netloc.startswith("docs."):
+                return "docs"
+        return path
 
     def _data_entities(self, extraction_results: dict[str, dict]) -> list[dict]:
         """Infer likely data entities from extraction outputs."""
@@ -318,8 +338,15 @@ class CompetitiveReportGenerator:
         """Generate the top-level competitive summary."""
         route_count = sum(1 for target in state.targets.values() if target.target_type.value == "route")
         successful_extractions = sum(1 for result in extraction_results.values() if result.get("status") == "success")
+        landing_pages = page_type_distribution.get("landing", 0)
+        content_pages = page_type_distribution.get("content", 0)
+        docs_pages = page_type_distribution.get("docs", 0)
         list_pages = page_type_distribution.get("list", 0)
-        form_pages = page_type_distribution.get("form", 0) + page_type_distribution.get("modal", 0)
+        form_pages = (
+            page_type_distribution.get("form", 0)
+            + page_type_distribution.get("modal", 0)
+            + page_type_distribution.get("auth", 0)
+        )
         detail_pages = page_type_distribution.get("detail", 0)
         dashboard_pages = page_type_distribution.get("dashboard", 0)
 
@@ -331,6 +358,12 @@ class CompetitiveReportGenerator:
         gaps: list[str] = []
         differentiators: list[str] = []
 
+        if landing_pages > 0:
+            strengths.append("Observed landing-style surfaces and user entry points, useful for product positioning.")
+        if content_pages > 0:
+            strengths.append("Observed content-oriented sections, suggesting an informational or community surface.")
+        if docs_pages > 0:
+            strengths.append("Observed documentation-like pages, indicating a knowledge-rich or developer-facing surface.")
         if list_pages > 0:
             strengths.append("Observed structured list/table surfaces, suggesting operational data workflows.")
         if form_pages > 0:
@@ -346,11 +379,17 @@ class CompetitiveReportGenerator:
         if successful_extractions > 0:
             differentiators.append("Structured extraction enables downstream benchmarking and entity-level product comparison.")
 
-        category = "admin_saas"
-        if dashboard_pages > list_pages and dashboard_pages > form_pages:
-            category = "dashboard_or_analytics"
-        elif form_pages > 0 and detail_pages > 0:
-            category = "admin_crud_platform"
+        category = "general_website"
+        if docs_pages >= max(landing_pages, content_pages, list_pages, form_pages, dashboard_pages, 1):
+            category = "developer_docs"
+        elif landing_pages + content_pages >= max(list_pages + form_pages + dashboard_pages, 2):
+            category = "content_or_marketing"
+        elif dashboard_pages + list_pages + form_pages >= 3:
+            category = "admin_saas"
+        elif form_pages >= 2 and landing_pages > 0:
+            category = "onboarding_or_application_flow"
+        elif list_pages + detail_pages >= 3:
+            category = "application_ui"
 
         return CompetitiveSummary(
             product_category_guess=category,
@@ -373,6 +412,10 @@ class CompetitiveReportGenerator:
             notes.append("The target shows meaningful data-dense surfaces, making structured extraction a strong differentiator.")
         if page_type_distribution.get("dashboard", 0) > 0:
             notes.append("Dashboard coverage suggests analytics or operational overview capabilities worth benchmarking against peers.")
+        if page_type_distribution.get("docs", 0) > 0:
+            notes.append("Documentation-heavy products benefit from broader content taxonomy, not only CRUD-oriented heuristics.")
+        if summary.product_category_guess == "content_or_marketing":
+            notes.append("This run looks more like a public content or marketing surface than a backoffice product.")
         if summary.workflow_complexity_score >= 0.5:
             notes.append("Workflow complexity appears moderate to high, so product comparison should include CRUD and configuration depth.")
         return notes

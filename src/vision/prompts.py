@@ -8,10 +8,12 @@ from src.vision.types import DOMSummary
 def build_vision_system_prompt() -> str:
     """Return the system prompt for page understanding."""
     return (
-        "You analyze admin and SaaS web application screenshots. "
+        "You analyze general websites, product sites, docs portals, onboarding flows, and web applications. "
         "Return structured JSON only. "
         "Classify the page type, detect major interface regions, "
         "suggest interaction hints, and provide short extraction hints. "
+        "Use page types such as landing, content, docs, list, detail, form, dashboard, auth, modal, or unknown. "
+        "Do not assume the site is an admin dashboard unless the screenshot strongly supports that. "
         "Do not suggest actions outside what is visible on screen."
     )
 

@@ -1,17 +1,18 @@
 # Frontend Mimic Agent
 
-A budget-aware, policy-driven browser agent for autonomous website exploration, artifact collection, and selective analysis. Optimized for admin dashboards, LIMS, ERP, and SaaS management applications.
+A browser agent for autonomous website interaction, evidence capture, and structured analysis. The current codebase started from admin-dashboard exploration, but is now being refactored toward a more general agent loop that can handle registration-first and multi-step product flows.
 
-The current implementation now also supports optional vision-assisted page understanding, structured extraction for list/detail/form pages, and competitive-analysis artifacts in both JSON and Markdown.
+The current implementation already supports optional vision-assisted page understanding, structured extraction for list/detail/form pages, deterministic competitive-analysis artifacts, and an optional LLM synthesis layer for the final report.
+
+The browser runtime remains Playwright-based. The current refactor direction is not to replace Playwright, but to make the control layer more agentic: goal-driven, step-by-step, re-observing after state changes, and preserving site memory for later steps in the same run.
 
 ## What It Does
 
-1. **Logs into** a target website using configured credentials
-2. **Autonomously explores** the site by detecting navigation menus, action buttons, modals, tabs, and expandable rows
-3. **Captures artifacts** — full-page screenshots and DOM snapshots for every state
-4. **Scores novelty** — uses DOM structural fingerprinting to avoid redundant analysis of near-duplicate pages
-5. **Analyzes** pages locally — detects components, layout patterns, design tokens, and tech stack
-6. **Produces structured reports** — inventory, site map, execution log, and exploration summary
+1. **Opens and navigates** a target website using Playwright
+2. **Captures evidence** — screenshots, DOM snapshots, logs, and state artifacts
+3. **Understands pages repeatedly** with DOM analysis and optional vision calls after important state changes
+4. **Extracts structured data** from list/detail/form-like surfaces
+5. **Produces structured outputs** that can support product teardown and competitive analysis
 
 ## Architecture
 
@@ -23,11 +24,19 @@ Observation Layer (Python — candidate detection, fingerprinting, novelty scori
 Execution Layer   (Playwright — navigate, click, capture)
 ```
 
-For each route page, the agent:
-1. Navigates and captures the page
-2. Explores all interactions inline (action dropdowns, dropdown items, add buttons, tabs, expandable rows)
-3. Uses novelty scoring to skip duplicate interaction states
-4. Moves to the next route
+The current runtime still uses a route-first exploration core, but is being shifted toward a more general:
+1. `observe`
+2. `decide`
+3. `act`
+4. `re-observe`
+5. `continue`
+loop suitable for broader browser-agent tasks.
+
+Recent agent-loop upgrades include:
+- goal-aware decision prioritization
+- action-outcome validation after clicks and form submits
+- lightweight site memory persisted as an artifact for the current domain
+- captcha / anti-bot detection as a first-class runtime state
 
 ## Quick Start
 
@@ -115,7 +124,8 @@ Edit `config/settings.local.yaml`:
 
 | Section | Key Settings |
 |---------|-------------|
-| `target` | `url` (login page), `dashboard_url` (page after login) |
+| `target` | `url` (entry page), `dashboard_url` (optional post-login page) |
+| `task` | `goal`, registration/login flow allowance, captcha policy |
 | `login` | `username`, `password`, form element selectors |
 | `crawl` | `wait_after_navigation`, `wait_for_spa`, `interaction_timeout` |
 | `budget` | `max_states` (capture limit), `max_depth`, `retry_limit`, `novelty_threshold` |
@@ -123,6 +133,17 @@ Edit `config/settings.local.yaml`:
 | `interaction` | Selectors for action buttons, modals, dropdowns, tabs, expand rows |
 | `browser` | `headless`, `viewport_width/height`, `slow_mo` |
 | `vision` | `enabled`, `provider`, `model`, `api_base_url`, `api_key_env`, `timeout_ms` |
+| `synthesis` | `enabled`, `provider`, `model`, `api_base_url`, `api_key_env`, `timeout_ms` |
+
+Important `task` settings:
+- `goal` – high-level objective for the agent
+- `goal_keywords` – optional extra terms that should bias action selection
+- `allow_registration_flows` – allow multi-step signup / onboarding flows
+- `captcha_policy` – how to behave when captcha or anti-bot is detected
+- `use_site_memory` – preserve and reuse per-domain action outcomes during a run
+- `validate_action_outcomes` – check whether a click or submit actually changed the state
+- `reobserve_on_state_change` – refresh page understanding after meaningful state changes
+- `use_vision_on_state_change` – allow vision on those repeated understanding passes
 
 ## Output
 
@@ -148,10 +169,15 @@ output/
 
 - **Budget-aware** — stops after `max_states` captures, never runs forever
 - **Novelty scoring** — DOM fingerprinting skips near-duplicate pages (e.g., 20 identical table views)
-- **Autonomous navigation** — detects sidebar menus, nav items, tabs, action dropdowns automatically
+- **Agent-loop foundation** – the main loop is being refactored from fixed exploration into observe/decide/act behavior
+- **Goal-driven decisions** – pending actions are prioritized against the task goal and what has already worked on the current domain
+- **Action validation** – the runtime checks for meaningful state change after important actions instead of assuming success
+- **Site memory** – the agent records selector/label success and challenge events into `site_memory.json`
+- **Repeated understanding** – the engine can refresh page understanding after route capture and key interaction captures
+- **Captcha / anti-bot awareness** — the engine detects common challenge indicators and can pause/report instead of blindly continuing
 - **Recovery** — retries on failure, re-authenticates on session expiry, backtracks on dead ends
 - **Structured logging** — every action is logged with timestamp, duration, result, and reason
-- **No API keys needed** — all analysis is local; LLM reasoning happens in your Claude/ChatGPT conversation
+- **Works without APIs for the core path** — browser control and local analysis do not require model APIs
 - **Framework-agnostic** — configurable selectors support Element Plus, Ant Design, Bootstrap, and custom UIs
 
 ## Workflow with Claude/ChatGPT
@@ -160,6 +186,7 @@ output/
 
 - Optional vision-enhanced page understanding
 - Structured extraction for list/detail/form pages
+- Optional LLM synthesis for the final competitive-analysis report
 - Dataset artifacts:
   - `dataset.jsonl`
   - `dataset_summary.json`
@@ -167,10 +194,13 @@ output/
 - Competitive-analysis outputs:
   - `competitive_analysis.json`
   - `competitive_analysis.md`
+  - `competitive_analysis_structured.md`
+  - `competitive_analysis_llm.json` when synthesis is enabled
 
 Notes:
-- DOM-first exploration and local analysis work without API keys
+- Core browser control and local analysis work without API keys
 - Vision enhancement requires API credentials because screenshot understanding is provider-backed
+- Final-report LLM synthesis also requires API credentials if enabled
 
 The intended workflow:
 

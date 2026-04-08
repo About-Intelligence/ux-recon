@@ -18,13 +18,14 @@ class PageAnalyzer:
     def analyze(self, html: str, computed_styles: dict[str, dict[str, str]] | None = None) -> dict:
         """Analyze a single page. Returns structured analysis dict."""
         soup = BeautifulSoup(html, "lxml")
+        class_tokens = self._collect_class_tokens(soup)
 
         result = {
             "component_types": self._get_component_types(soup),
             "components": self._detect_components(soup),
             "layout_pattern": self._detect_layout(soup),
-            "tech_stack": self._detect_tech_stack(html),
-            "css_framework": self._detect_css_framework(soup),
+            "tech_stack": self._detect_tech_stack(html, class_tokens),
+            "css_framework": self._detect_css_framework(class_tokens),
             "design_tokens": self._extract_design_tokens(computed_styles) if computed_styles else {},
             "element_stats": self._count_elements(soup),
         }
@@ -103,41 +104,46 @@ class PageAnalyzer:
             parts.append("footer")
         return " + ".join(parts)
 
-    def _detect_tech_stack(self, html: str) -> dict[str, str]:
+    def _detect_tech_stack(self, html: str, class_tokens: set[str]) -> dict[str, str]:
         """Detect frontend tech stack."""
         stack = {}
-        if "data-v-" in html or "__vue__" in html:
+        html_lower = html.lower()
+
+        if re.search(r"data-v-[0-9a-f]{6,}", html_lower) or "__vue__" in html_lower:
             stack["framework"] = "Vue.js"
-        elif "__NEXT" in html or "_next" in html:
+        elif "__next_data__" in html_lower or "/_next/" in html_lower or 'id="__next"' in html_lower:
             stack["framework"] = "Next.js"
-        elif "data-reactroot" in html or "_reactRootContainer" in html:
+        elif "data-reactroot" in html_lower or "_reactrootcontainer" in html_lower or "__react_devtools_global_hook__" in html_lower:
             stack["framework"] = "React"
-        elif "ng-" in html:
+        elif re.search(r"\bng-version\b", html_lower) or re.search(r"_ng(content|host)-", html_lower) or "ng-app" in html_lower:
             stack["framework"] = "Angular"
 
-        if "el-" in html:
+        if sum(1 for token in class_tokens if token.startswith("el-")) >= 8:
             stack["ui_library"] = "Element Plus"
-        elif "ant-" in html:
+        elif sum(1 for token in class_tokens if token.startswith("ant-")) >= 8:
             stack["ui_library"] = "Ant Design"
-        elif "bootstrap" in html.lower():
+        elif "bootstrap" in html_lower or sum(1 for token in class_tokens if token.startswith(("btn-", "col-", "row", "container", "navbar"))) >= 8:
             stack["ui_library"] = "Bootstrap"
 
         return stack
 
-    def _detect_css_framework(self, soup: BeautifulSoup) -> str:
+    def _detect_css_framework(self, class_tokens: set[str]) -> str:
         """Detect CSS framework from class naming patterns."""
-        classes: set[str] = set()
-        for tag in soup.find_all(attrs={"class": True}):
-            for cls in tag.get("class", []):
-                classes.add(cls)
-
-        el = sum(1 for c in classes if c.startswith("el-"))
-        ant = sum(1 for c in classes if c.startswith("ant-"))
-        tw = sum(1 for c in classes if re.match(r'^(bg|text|flex|grid|p|m|w|h|rounded|shadow|border)-', c))
+        el = sum(1 for c in class_tokens if c.startswith("el-"))
+        ant = sum(1 for c in class_tokens if c.startswith("ant-"))
+        tw = sum(1 for c in class_tokens if re.match(r'^(bg|text|flex|grid|p|m|w|h|rounded|shadow|border)-', c))
 
         scores = {"Element Plus": el, "Ant Design": ant, "Tailwind CSS": tw}
         best = max(scores, key=scores.get)  # type: ignore[arg-type]
-        return best if scores[best] > 5 else "unknown"
+        return best if scores[best] >= 8 else "unknown"
+
+    def _collect_class_tokens(self, soup: BeautifulSoup) -> set[str]:
+        """Collect distinct class tokens from the page."""
+        classes: set[str] = set()
+        for tag in soup.find_all(attrs={"class": True}):
+            for cls in tag.get("class", []):
+                classes.add(str(cls))
+        return classes
 
     def _extract_design_tokens(self, computed_styles: dict[str, dict[str, str]]) -> dict:
         """Extract design tokens from computed styles."""

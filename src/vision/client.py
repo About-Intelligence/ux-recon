@@ -93,9 +93,10 @@ class VisionClient:
         raw = json.loads(body)
         content = raw["choices"][0]["message"]["content"]
         parsed = self._parse_content(content)
+        normalized = self._normalize_parsed(parsed)
 
         try:
-            return VisionResult.model_validate(parsed)
+            return VisionResult.model_validate(normalized)
         except Exception as e:
             return VisionResult(notes=f"vision_parse_error: {e}")
 
@@ -122,6 +123,216 @@ class VisionClient:
                 text = "\n".join(lines[1:-1]).strip()
 
         return json.loads(text)
+
+    def _normalize_parsed(self, parsed: dict) -> dict:
+        """Normalize loosely structured model output into the expected schema."""
+        page_type = self._normalize_page_type(parsed.get("page_type"))
+        confidence = self._normalize_confidence(parsed.get("confidence"))
+        regions = self._normalize_regions(parsed.get("regions"))
+        interaction_hints = self._normalize_interaction_hints(parsed.get("interaction_hints"))
+        extraction_hints = self._normalize_extraction_hints(parsed.get("extraction_hints"))
+        notes = self._normalize_notes(parsed.get("notes"))
+        if not notes and parsed.get("reasoning"):
+            notes = self._normalize_notes(parsed.get("reasoning"))
+
+        return {
+            "page_type": page_type,
+            "confidence": confidence,
+            "regions": regions,
+            "interaction_hints": interaction_hints,
+            "extraction_hints": extraction_hints,
+            "notes": notes,
+        }
+
+    def _normalize_page_type(self, value: object) -> str:
+        raw = str(value or "").strip().lower()
+        if raw in {"landing", "content", "docs", "list", "detail", "form", "dashboard", "auth", "modal", "unknown"}:
+            return raw
+
+        mappings = {
+            "homepage": "landing",
+            "home": "landing",
+            "marketing": "landing",
+            "content": "content",
+            "article": "content",
+            "community": "content",
+            "documentation": "docs",
+            "developer docs": "docs",
+            "developer portal": "docs",
+            "guide": "docs",
+            "reference": "docs",
+            "auth": "auth",
+            "login": "auth",
+            "signin": "auth",
+            "sign in": "auth",
+            "signup": "auth",
+            "sign up": "auth",
+            "register": "auth",
+            "listing": "list",
+            "table": "list",
+            "search results": "list",
+            "record": "detail",
+            "profile": "detail",
+            "dialog": "modal",
+            "drawer": "modal",
+        }
+        for key, mapped in mappings.items():
+            if key in raw:
+                return mapped
+        return "unknown"
+
+    def _normalize_confidence(self, value: object) -> float:
+        try:
+            number = float(value)
+            return max(0.0, min(1.0, number))
+        except Exception:
+            return 0.0
+
+    def _normalize_regions(self, value: object) -> list[dict]:
+        if isinstance(value, dict):
+            items = []
+            for key, label in value.items():
+                items.append({
+                    "region_type": self._normalize_region_type(key),
+                    "label": str(label),
+                    "bbox_norm": [],
+                    "confidence": 0.5,
+                })
+            return items
+        if isinstance(value, list):
+            items: list[dict] = []
+            for entry in value:
+                if isinstance(entry, str):
+                    items.append({
+                        "region_type": self._normalize_region_type(entry),
+                        "label": entry,
+                        "bbox_norm": [],
+                        "confidence": 0.5,
+                    })
+                elif isinstance(entry, dict):
+                    items.append({
+                        "region_type": self._normalize_region_type(entry.get("region_type") or entry.get("type") or entry.get("name")),
+                        "label": str(entry.get("label") or entry.get("name") or ""),
+                        "bbox_norm": self._normalize_bbox(entry.get("bbox_norm") or entry.get("bbox") or []),
+                        "confidence": self._normalize_confidence(entry.get("confidence", 0.5)),
+                    })
+            return items
+        return []
+
+    def _normalize_region_type(self, value: object) -> str:
+        raw = str(value or "").strip().lower()
+        allowed = {
+            "sidebar", "topnav", "filter_bar", "table", "detail_panel", "form",
+            "modal", "drawer", "tabs", "pagination", "toolbar", "hero",
+            "content", "article", "search_bar", "footer", "unknown",
+        }
+        if raw in allowed:
+            return raw
+        mappings = {
+            "nav": "topnav",
+            "top nav": "topnav",
+            "header": "topnav",
+            "search": "search_bar",
+            "search bar": "search_bar",
+            "main content": "content",
+            "body": "content",
+            "hero": "hero",
+            "article": "article",
+            "doc": "article",
+            "documentation": "article",
+        }
+        for key, mapped in mappings.items():
+            if key in raw:
+                return mapped
+        return "unknown"
+
+    def _normalize_interaction_hints(self, value: object) -> list[dict]:
+        if isinstance(value, dict):
+            return [
+                {
+                    "hint_type": self._normalize_hint_type(key),
+                    "target_region": "",
+                    "label": str(text),
+                    "confidence": 0.5,
+                }
+                for key, text in value.items()
+            ]
+        if isinstance(value, list):
+            items: list[dict] = []
+            for entry in value:
+                if isinstance(entry, str):
+                    items.append({
+                        "hint_type": self._normalize_hint_type(entry),
+                        "target_region": "",
+                        "label": entry,
+                        "confidence": 0.5,
+                    })
+                elif isinstance(entry, dict):
+                    items.append({
+                        "hint_type": self._normalize_hint_type(entry.get("hint_type") or entry.get("type") or entry.get("label")),
+                        "target_region": str(entry.get("target_region") or ""),
+                        "label": str(entry.get("label") or entry.get("text") or ""),
+                        "confidence": self._normalize_confidence(entry.get("confidence", 0.5)),
+                    })
+            return items
+        return []
+
+    def _normalize_hint_type(self, value: object) -> str:
+        raw = str(value or "").strip().lower()
+        allowed = {
+            "primary_action", "row_actions", "tab_switch", "open_modal",
+            "open_detail", "paginate", "filter", "search", "sign_in",
+            "sign_up", "navigate_section", "unknown",
+        }
+        if raw in allowed:
+            return raw
+        mappings = {
+            "search": "search",
+            "sign in": "sign_in",
+            "signin": "sign_in",
+            "login": "sign_in",
+            "sign up": "sign_up",
+            "signup": "sign_up",
+            "register": "sign_up",
+            "navigate": "navigate_section",
+            "section": "navigate_section",
+            "tab": "tab_switch",
+            "modal": "open_modal",
+            "detail": "open_detail",
+            "pagination": "paginate",
+            "filter": "filter",
+        }
+        for key, mapped in mappings.items():
+            if key in raw:
+                return mapped
+        return "unknown"
+
+    def _normalize_extraction_hints(self, value: object) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, dict):
+            return [f"{key}: {text}" for key, text in value.items()]
+        if isinstance(value, list):
+            return [str(item) for item in value if str(item).strip()]
+        return []
+
+    def _normalize_notes(self, value: object) -> str:
+        if isinstance(value, list):
+            return " ".join(str(item) for item in value if str(item).strip())
+        if value is None:
+            return ""
+        return str(value)
+
+    def _normalize_bbox(self, value: object) -> list[float]:
+        if not isinstance(value, list):
+            return []
+        numbers: list[float] = []
+        for item in value[:4]:
+            try:
+                numbers.append(float(item))
+            except Exception:
+                return []
+        return numbers
 
     def _prepare_image_bytes(self, screenshot_path: Path) -> bytes:
         """Resize screenshot to configured bounds before upload."""

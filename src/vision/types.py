@@ -7,14 +7,19 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-PageType = Literal["list", "detail", "form", "dashboard", "modal", "unknown"]
+PageType = Literal[
+    "landing", "content", "docs", "list", "detail",
+    "form", "dashboard", "auth", "modal", "unknown",
+]
 RegionType = Literal[
     "sidebar", "topnav", "filter_bar", "table", "detail_panel", "form",
-    "modal", "drawer", "tabs", "pagination", "toolbar", "unknown",
+    "modal", "drawer", "tabs", "pagination", "toolbar", "hero",
+    "content", "article", "search_bar", "footer", "unknown",
 ]
 HintType = Literal[
     "primary_action", "row_actions", "tab_switch", "open_modal",
-    "open_detail", "paginate", "filter", "unknown",
+    "open_detail", "paginate", "filter", "search", "sign_in",
+    "sign_up", "navigate_section", "unknown",
 ]
 
 
@@ -65,4 +70,3 @@ class PageInsight(BaseModel):
     extraction_strategy: str = "unknown"
     high_value_page: bool = False
     analysis_tags: list[str] = Field(default_factory=list)
-

@@ -7,6 +7,15 @@
 - Only `ROUTE` targets enter the BFS frontier
 - Page-local interactions such as dropdown items, tabs, add modals, and expanded rows are explored inline after a route is captured
 
+### New direction after leader sync
+- The current DOM-grounded / route-first model is no longer sufficient as the long-term control strategy
+- The project now needs to move toward a more general browser-agent architecture
+- Target websites may include:
+  - multi-step LLM experience websites
+  - ad-platform or growth-tool websites
+  - registration-first products where access requires completing onboarding before browsing
+- The system may need to handle captcha / anti-bot friction and should be prepared for human-in-the-loop or fallback handling
+
 ### Current strengths
 - Strong artifact discipline already exists: screenshots, HTML snapshots, inventory, sitemap, run log, analysis
 - The project is well-suited to admin/SaaS/backoffice environments
@@ -72,6 +81,92 @@
   - rerank DOM-derived route candidates
   - guide later extraction strategy
 
+### Direction change implied by new scope
+- For broader website coverage, vision should no longer be treated only as advisory page classification
+- The next architecture likely needs repeated page understanding and step-level planning
+- This pushes the system closer to mainstream browser-use agents:
+  - observe
+  - decide next action
+  - act
+  - re-observe
+  - continue until task or budget ends
+- Deterministic evidence capture still remains a differentiator and should be preserved
+- A practical migration path is:
+  - keep the current browser control and artifact stack
+  - introduce a generic decision object and loop skeleton first
+  - progressively reduce hard-coded route-first assumptions
+  - later add onboarding, captcha handling, and human-in-the-loop states
+
+### Borrow points now adopted from `web-access`
+- Keep the browser runtime on Playwright, but move the control logic toward a goal-driven browser agent
+- Treat each step as `observe -> decide -> act -> validate -> continue`, not just `act and assume success`
+- Preserve lightweight site memory inside the run so the agent can bias toward selectors, labels, and action types that already worked on the same domain
+- Treat captcha / anti-bot and similar blockers as normal runtime states that should be surfaced and remembered
+
+### First agent-loop migration step now implemented
+- The main engine loop now uses an explicit `observe -> decide -> execute` structure
+- Route navigation is still the current execution behavior, but the control surface is no longer tied directly to route selection
+- Re-observation after meaningful state changes is now part of the runtime
+- Captcha / anti-bot detection has a first-pass pause-and-report implementation
+- The runtime now has two decision sources:
+  - route frontier
+  - page-level planned actions such as tabs, add/create buttons, and onboarding-style primary CTAs
+- The runtime now also has a first-pass form action:
+  - detect visible auth/onboarding-like forms
+  - heuristically fill fields from task/login profile values
+  - submit and capture the resulting state
+
+### Additional loop upgrades now implemented
+- Pending decisions are no longer consumed in pure FIFO order; they are scored against:
+  - the current task goal
+  - optional goal keywords
+  - per-domain action memory from the current run
+- Important clicks and form submits now validate whether they produced meaningful state change
+- The runtime now persists `site_memory.json`, including:
+  - selector success / failure counts
+  - label success / failure counts
+  - action-type success / failure counts
+  - challenge events
+
+### First live-validation utilities now added
+- Added `SMOKE_TEST.md` so the first live validation run has a fixed, repeatable checklist
+
+### Current model decision
+- Current practical local default:
+  - `vision.model = gpt-5.4`
+  - `synthesis.model = gpt-5.4`
+
+### Public-site smoke test compatibility
+- The authenticator now degrades gracefully for public websites:
+  - when no credentials are configured, it navigates to the target URL and continues
+  - session checks and re-login no longer block public-site runs
+- This makes first live smoke tests possible on simple public targets before trying registration-gated products
+
+### First live smoke test result
+- A full smoke test against `https://www.python.org/` completed successfully with:
+  - browser launch
+  - vision-enabled observation
+  - route capture
+  - artifact generation
+  - final competitive-analysis outputs
+- The run captured 8 states and produced:
+  - inventory
+  - sitemap
+  - coverage
+  - site memory
+  - dataset artifacts
+  - competitive-analysis artifacts
+- The test also confirmed an important limitation:
+  - current heuristics are still too admin-biased for general public websites
+  - the system classified `python.org` as `admin_saas`
+  - page typing and extraction strategy selection over-classified pages as `form`
+  - framework / UI-library inference produced false positives
+
+### Post-bias-reduction position
+- After broadening taxonomy and normalizing loose vision outputs, the system no longer collapses `python.org` into `admin_saas`
+- Vision-model probing and comparison utilities have been removed to keep the runtime path simpler
+- We are standardizing on `gpt-5.4` for vision going forward
+
 ### Skillization boundary
 - Good future skill candidates:
   - `competitive-analysis-review`
@@ -82,6 +177,11 @@
   - extraction engine
   - artifact persistence
   - candidate reranking logic
+
+### Final analysis boundary
+- Deterministic aggregation should remain the stable, auditable base layer
+- Final competitive-analysis prose is a good place to add optional LLM synthesis
+- This keeps browser control deterministic while still improving the quality of the final report
 
 ## Code Changes Completed So Far
 - Added `vision` config skeleton in `src/config.py` and `config/settings.yaml`
@@ -94,8 +194,8 @@
 - Added prompt and placeholder client in:
   - `src/vision/prompts.py`
   - `src/vision/client.py`
-- Added implementation breakdown file:
-  - `COMPETITIVE_ANALYSIS_IMPLEMENTATION_PLAN.md`
+- Consolidated the project direction and implementation plan into:
+  - `DISCUSSION_BRIEF.md`
 - Integrated vision-aware observation into `src/agent/engine.py`
 - Added lightweight DOM summary generation during `OBSERVE`
 - Added per-page insight persistence and report-level page semantics summary
@@ -174,7 +274,13 @@
 
 ## Open Decisions Still Ahead
 - Exact vision provider API integration details
-- Final page insight schema used by reranking and extraction
+- Whether the engine should move from route-first BFS to a more general step-based agent loop
+- How to trigger repeated page understanding after navigation, modal open, tab switch, form progress, or failed action
+- How to handle captcha / anti-bot challenges:
+  - human-in-the-loop
+  - pause and surface evidence
+  - fallback retry logic
+- Which public site should be used for first live API smoke test
 - Extraction confidence and failure taxonomy refinement
 - Final competitive-analysis scoring/summary heuristics
 

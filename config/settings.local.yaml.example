@@ -5,6 +5,23 @@ target:
   url: "https://your-website.com/login"
   dashboard_url: "https://your-website.com/dashboard"  # URL after login (leave empty to auto-detect)
 
+task:
+  goal: "Sign up, enter the product, and understand the main workflows."
+  goal_keywords: []
+  allow_registration_flows: true
+  allow_login_flows: true
+  captcha_policy: "pause_and_report"
+  human_assistance_allowed: true
+  use_site_memory: true
+  validate_action_outcomes: true
+  reobserve_on_state_change: true
+  use_vision_on_state_change: true
+  max_reobservations_per_run: 30
+  profile_name: "Test User"
+  profile_email: "test@example.com"
+  profile_password: "TestPassword123!"
+  profile_company: "Example Inc"
+
 login:
   username: "your_username"
   password: "your_password"
@@ -38,7 +55,15 @@ login:
 # vision:
 #   enabled: true                  # Requires API credentials
 #   provider: "openai"
-#   model: "gpt-4.1-mini"
+#   model: "gpt-5.4"
 #   api_base_url: "https://api.openai.com/v1"
 #   api_key_env: "OPENAI_API_KEY"
 #   timeout_ms: 15000
+
+# synthesis:
+#   enabled: true                  # Optional LLM synthesis for final competitive report
+#   provider: "openai"
+#   model: "gpt-5.4"
+#   api_base_url: "https://api.openai.com/v1"
+#   api_key_env: "OPENAI_API_KEY"
+#   timeout_ms: 20000
