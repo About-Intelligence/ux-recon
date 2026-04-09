@@ -12,7 +12,7 @@ from src.agent.state import AgentState
 
 class CompetitiveSummary(BaseModel):
     product_category_guess: str = "unknown"
-    admin_maturity_score: float = 0.0
+    application_surface_score: float = 0.0
     data_density_score: float = 0.0
     workflow_complexity_score: float = 0.0
     observed_strengths: list[str] = Field(default_factory=list)
@@ -119,7 +119,7 @@ class CompetitiveReportGenerator:
             "## Executive Summary",
             f"- **Target:** {analysis.target}",
             f"- **Product category guess:** {analysis.competitive_summary.product_category_guess}",
-            f"- **Admin maturity score:** {analysis.competitive_summary.admin_maturity_score:.2f}",
+            f"- **Application surface score:** {analysis.competitive_summary.application_surface_score:.2f}",
             f"- **Data density score:** {analysis.competitive_summary.data_density_score:.2f}",
             f"- **Workflow complexity score:** {analysis.competitive_summary.workflow_complexity_score:.2f}",
             "",
@@ -147,6 +147,25 @@ class CompetitiveReportGenerator:
                 )
         else:
             lines.append("- No confident data entities extracted.")
+
+        content_evidence = self._content_evidence(analysis.evidence_index)
+        lines.extend(["", "## Content Evidence"])
+        if content_evidence:
+            for item in content_evidence:
+                lines.append(f"- `{item.get('url', '')}`: {item.get('summary', '')}")
+        else:
+            lines.append("- No structured content-block evidence extracted yet.")
+
+        evidence_samples = self._evidence_samples(analysis.evidence_index)
+        lines.extend(["", "## Evidence Samples"])
+        if evidence_samples:
+            for item in evidence_samples:
+                lines.append(
+                    f"- **{item.get('kind', 'unknown')}** [{item.get('role', '')}] "
+                    f"`{item.get('url', '')}`: {item.get('text', '')}"
+                )
+        else:
+            lines.append("- No page-level evidence samples available.")
 
         lines.extend(["", "## Interaction Patterns"])
         for pattern in analysis.interaction_patterns:
@@ -253,6 +272,28 @@ class CompetitiveReportGenerator:
                     entity_counter.setdefault(name, {"source_count": 0, "example_count": 0})
                     entity_counter[name]["source_count"] += 1
                     entity_counter[name]["example_count"] += 1
+            elif strategy == "content_blocks":
+                evidence_units = result.get("evidence_units", [])
+                if evidence_units:
+                    for unit in evidence_units[:20]:
+                        if str(unit.get("kind", "")) != "content_section":
+                            continue
+                        name = str(unit.get("normalized_text") or unit.get("raw_text") or "").strip()
+                        if not name:
+                            continue
+                        entity_counter.setdefault(name, {"source_count": 0, "example_count": 0})
+                        entity_counter[name]["source_count"] += 1
+                        entity_counter[name]["example_count"] += 1
+                else:
+                    for record in result.get("records", []):
+                        if record.get("kind") == "content_sections":
+                            for item in record.get("items", [])[:8]:
+                                name = str(item.get("title") or "").strip()
+                                if not name:
+                                    continue
+                                entity_counter.setdefault(name, {"source_count": 0, "example_count": 0})
+                                entity_counter[name]["source_count"] += 1
+                                entity_counter[name]["example_count"] += 1
 
         ranked = sorted(
             entity_counter.items(),
@@ -323,15 +364,58 @@ class CompetitiveReportGenerator:
             })
 
         for state_id, result in extraction_results.items():
-            items.append({
+            item = {
                 "state_id": state_id,
                 "url": result.get("url", ""),
                 "kind": "extraction",
                 "strategy": result.get("strategy", "unknown"),
                 "status": result.get("status", "unknown"),
-            })
+            }
+            if result.get("strategy") == "content_blocks":
+                item["summary"] = self._content_result_summary(result)
+            items.append(item)
+
+            for unit in result.get("evidence_units", [])[:12]:
+                items.append({
+                    "state_id": state_id,
+                    "url": result.get("url", ""),
+                    "kind": str(unit.get("kind", "evidence_unit")),
+                    "role": str(unit.get("role", "")),
+                    "text": str(unit.get("normalized_text") or unit.get("raw_text") or ""),
+                    "locator": str(unit.get("locator", "")),
+                    "confidence": unit.get("confidence", 0.0),
+                })
 
         return items
+
+    def _content_result_summary(self, result: dict) -> str:
+        summary = result.get("summary", {}) or {}
+        parts: list[str] = []
+        hero_count = int(summary.get("hero_title_count", 0) or 0)
+        cta_count = int(summary.get("primary_cta_count", 0) or 0)
+        section_count = int(summary.get("content_section_count", 0) or 0)
+        nav_count = int(summary.get("nav_item_count", 0) or 0)
+        if hero_count:
+            parts.append(f"{hero_count} hero titles")
+        if cta_count:
+            parts.append(f"{cta_count} CTAs")
+        if section_count:
+            parts.append(f"{section_count} sections")
+        if nav_count:
+            parts.append(f"{nav_count} nav items")
+        return ", ".join(parts) or "content structure captured"
+
+    def _content_evidence(self, evidence_index: list[dict]) -> list[dict]:
+        return [
+            item for item in evidence_index
+            if item.get("kind") == "extraction" and item.get("strategy") == "content_blocks"
+        ][:8]
+
+    def _evidence_samples(self, evidence_index: list[dict]) -> list[dict]:
+        return [
+            item for item in evidence_index
+            if item.get("kind") in {"hero", "cta", "nav_item", "content_section"} and item.get("text")
+        ][:10]
 
     def _competitive_summary(self, state: AgentState, page_type_distribution: dict[str, int],
                              extraction_results: dict[str, dict]) -> CompetitiveSummary:
@@ -350,7 +434,7 @@ class CompetitiveReportGenerator:
         detail_pages = page_type_distribution.get("detail", 0)
         dashboard_pages = page_type_distribution.get("dashboard", 0)
 
-        admin_maturity = min(1.0, (route_count / 20) + (form_pages / 20) + (detail_pages / 20))
+        application_surface = min(1.0, (route_count / 20) + (form_pages / 20) + (detail_pages / 20))
         data_density = min(1.0, (list_pages / 12) + (successful_extractions / 20))
         workflow_complexity = min(1.0, (form_pages / 15) + (detail_pages / 15) + (dashboard_pages / 20))
 
@@ -367,11 +451,17 @@ class CompetitiveReportGenerator:
         if list_pages > 0:
             strengths.append("Observed structured list/table surfaces, suggesting operational data workflows.")
         if form_pages > 0:
-            strengths.append("Observed configuration or CRUD form surfaces, indicating editable product workflows.")
+            strengths.append("Observed interactive form surfaces, indicating editable or guided product workflows.")
         if detail_pages > 0:
             strengths.append("Observed detail-oriented views, suggesting entity-centric product organization.")
+        content_extractions = sum(
+            1 for result in extraction_results.values() if result.get("strategy") == "content_blocks" and result.get("status") == "success"
+        )
+
         if successful_extractions == 0:
             gaps.append("No successful structured extraction yet; entity understanding remains shallow.")
+        elif content_extractions > 0:
+            strengths.append("Structured content extraction captured navigational, CTA, or section-level evidence useful for competitive teardown.")
         if route_count < 5:
             gaps.append("Limited discovered route surface; competitive conclusions may be incomplete.")
 
@@ -385,7 +475,7 @@ class CompetitiveReportGenerator:
         elif landing_pages + content_pages >= max(list_pages + form_pages + dashboard_pages, 2):
             category = "content_or_marketing"
         elif dashboard_pages + list_pages + form_pages >= 3:
-            category = "admin_saas"
+            category = "application_surface"
         elif form_pages >= 2 and landing_pages > 0:
             category = "onboarding_or_application_flow"
         elif list_pages + detail_pages >= 3:
@@ -393,7 +483,7 @@ class CompetitiveReportGenerator:
 
         return CompetitiveSummary(
             product_category_guess=category,
-            admin_maturity_score=round(admin_maturity, 2),
+            application_surface_score=round(application_surface, 2),
             data_density_score=round(data_density, 2),
             workflow_complexity_score=round(workflow_complexity, 2),
             observed_strengths=strengths,

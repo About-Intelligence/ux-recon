@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from src.extraction.content_extractor import ContentExtractor
 from src.extraction.detail_extractor import DetailExtractor
 from src.extraction.form_extractor import FormExtractor
 from src.extraction.list_extractor import ListExtractor
@@ -12,12 +15,15 @@ class ExtractionEngine:
     """Dispatches extraction based on the chosen strategy."""
 
     def __init__(self) -> None:
+        self._content = ContentExtractor()
         self._list = ListExtractor()
         self._detail = DetailExtractor()
         self._form = FormExtractor()
 
     def extract(self, html: str, state_id: str, target_id: str, url: str,
-                page_type: str, strategy: str, evidence_paths: EvidencePaths) -> ExtractionResult:
+                page_type: str, strategy: str, evidence_paths: EvidencePaths,
+                page_insight: dict[str, Any] | None = None,
+                vision_result: dict[str, Any] | None = None) -> ExtractionResult:
         """Run the selected extraction strategy."""
         try:
             if strategy == "list_table":
@@ -26,6 +32,11 @@ class ExtractionEngine:
                 return self._detail.extract(html, state_id, target_id, url, page_type, evidence_paths)
             if strategy == "form_schema":
                 return self._form.extract(html, state_id, target_id, url, page_type, evidence_paths)
+            if strategy == "content_blocks":
+                return self._content.extract(
+                    html, state_id, target_id, url, page_type, evidence_paths,
+                    page_insight=page_insight, vision_result=vision_result,
+                )
             return ExtractionResult(
                 state_id=state_id,
                 target_id=target_id,
@@ -42,7 +53,7 @@ class ExtractionEngine:
                 target_id=target_id,
                 url=url,
                 page_type=page_type,
-                strategy=strategy if strategy in {"list_table", "detail_fields", "form_schema"} else "unknown",
+                strategy=strategy if strategy in {"list_table", "detail_fields", "form_schema", "content_blocks"} else "unknown",
                 status="failed",
                 evidence_paths=evidence_paths,
                 error=str(e),

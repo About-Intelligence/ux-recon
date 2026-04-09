@@ -1,476 +1,461 @@
-# Architecture: Frontend Mimic Agent Framework
+# Architecture: Frontend Recon Agent
 
-> A budget-aware, policy-driven browser agent framework for autonomous website exploration,
-> artifact collection, and selective analysis — optimized for admin dashboards, LIMS, ERP,
-> and SaaS management applications.
+> A Playwright-based browser agent that preserves evidence, produces structured page understanding, and supports downstream competitive analysis.
 
-## Three-Layer Design
+## Current Position
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  REASONING LAYER (external — Claude/ChatGPT via conversation)│
-│  - Selective deep analysis                                   │
-│  - Architecture summarization                                │
-│  - Frontend replication                                      │
-│  - Triggered only when justified by novelty/budget           │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ handoff (structured artifacts)
-┌──────────────────────────▼──────────────────────────────────┐
-│  OBSERVATION LAYER (Python — deterministic)                  │
-│  - Page metadata extraction                                  │
-│  - Candidate interaction detection                           │
-│  - DOM structural fingerprinting                             │
-│  - Novelty scoring (cheap signals)                           │
-│  - Component/pattern detection                               │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ data
-┌──────────────────────────▼──────────────────────────────────┐
-│  EXECUTION LAYER (Playwright — browser control)              │
-│  - Navigate, click, wait, scroll                             │
-│  - Screenshot capture                                        │
-│  - HTML/DOM capture                                          │
-│  - Route transitions                                         │
-│  - Login/authentication                                      │
-└─────────────────────────────────────────────────────────────┘
-```
+The project is no longer best described as a route-first admin-dashboard crawler.
 
-## State Machine
+The current direction is:
 
-8 states, simple enum FSM with a `while` loop:
+- a more agentic browser-control loop
+- broader support for general websites, not only admin/SaaS products
+- deterministic evidence capture as a core differentiator
+- optional vision/LLM understanding layered on top of grounded browser execution
 
-```
-    ┌──────────┐
-    │INITIALIZE│
-    └────┬─────┘
-         ▼
-    ┌──────────┐
-    │AUTHENTICATE│
-    └────┬─────┘
-         ▼
-    ┌──────────┐◄─────────────────────────────┐
-    │ OBSERVE  │  (extract page signals,       │
-    │          │   detect candidates)           │
-    └────┬─────┘                               │
-         ▼                                     │
-    ┌──────────────┐                           │
-    │SELECT_ACTION │  (pick next from frontier, │
-    │              │   check budget/stop)       │
-    └────┬────┬────┘                           │
-         │    │ (budget exhausted              │
-         │    │  or frontier empty)            │
-         ▼    ▼                                │
-    ┌────────┐ ┌──────────┐                    │
-    │EXECUTE │ │ FINALIZE │                    │
-    │        │ └──────────┘                    │
-    └────┬───┘                                 │
-         ▼                                     │
-    ┌──────────────┐                           │
-    │EVAL_NOVELTY  │  (is this state new       │
-    │              │   or near-duplicate?)      │
-    └────┬────┬────┘                           │
-         │    │ (low novelty → skip deep)      │
-         ▼    ▼                                │
-    ┌─────────┐  ┌───────────────────┐         │
-    │ ANALYZE │  │BACKTRACK_CONTINUE │─────────┘
-    │(optional│  └───────────────────┘
-    │ deep)   │─────────────────────────────────┘
-    └─────────┘
+The system should be understood as two cooperating flows:
+
+- control flow: `observe -> decide -> act -> validate -> re-observe`
+- evidence flow: `collect -> normalize -> anchor -> assemble -> aggregate`
+
+## System Model
+
+```text
+                     AGENTIC CONTROL LOOP
+      observe -> decide -> act -> validate -> re-observe -> continue
+                               |
+                               v
+                    PAGE UNDERSTANDING LAYER
+        DOM summary + screenshot + runtime state + optional vision/LLM
+                               |
+                               v
+                   EVIDENCE COLLECTION LAYER
+      collect raw nodes -> normalize -> anchor -> assemble evidence
+                               |
+        ---------------------------------------------------------
+        |                         |                            |
+        v                         v                            v
+  Executable Evidence       Content Evidence           Structural Evidence
+  CTA / nav / form / tab    hero / docs / sections     layout / regions / TOC
+        \                         |                            /
+         \                        |                           /
+          \                       v                          /
+           -------------> PAGE EVIDENCE PACK <--------------
+                               |
+                               v
+                    CROSS-PAGE AGGREGATION
+       category / modules / workflows / strengths / gaps / evidence index
+                               |
+                               v
+                 REPORTS + JSON ARTIFACTS + REVIEW HANDOFF
 ```
 
-### State Details
+## Architectural Layers
 
-| State | What happens | Deterministic? |
-|-------|-------------|----------------|
-| INITIALIZE | Load config, create output dirs, launch browser | Yes |
-| AUTHENTICATE | Login using configured selectors | Yes |
-| OBSERVE | Extract metadata, find candidate interactions, compute DOM fingerprint | Yes |
-| SELECT_ACTION | Pick next target from frontier (BFS), check budget/stop conditions | Yes |
-| EXECUTE | Navigate/click/scroll, capture screenshot + HTML | Yes |
-| EVAL_NOVELTY | Compare DOM fingerprint to seen states, score novelty | Yes |
-| ANALYZE | Local DOM analysis (components, layout, design tokens). Deep analysis flagged for LLM handoff | Mostly yes |
-| BACKTRACK_CONTINUE | Pop back to parent context or continue frontier | Yes |
-| FINALIZE | Generate artifacts, write reports, package handoff | Yes |
+### 1. Execution Layer
+
+The execution layer remains Playwright-based.
+
+Its job is to:
+
+- launch and manage the browser
+- navigate and click
+- fill forms and submit actions
+- capture screenshots and HTML
+- detect whether an action produced meaningful state change
+
+This layer should stay deterministic and tool-like. It should not decide strategy by itself.
+
+### 2. Observation and Understanding Layer
+
+This layer turns the current browser state into grounded page understanding.
+
+Inputs:
+
+- current URL
+- DOM
+- screenshot
+- runtime context
+- optional task goal and site memory
+
+Outputs:
+
+- candidate actions
+- DOM summary
+- page type hints
+- high-value signals
+- page insight artifacts
+
+This layer is where optional vision/LLM support belongs. The model should help interpret the page, not directly replace grounded browser execution.
+
+### 3. Evidence Collection Layer
+
+This layer answers:
+
+> What on this page is worth preserving as reusable, reviewable evidence?
+
+It should preserve as much rule-grounded evidence as possible before any higher-level summarization.
+
+Its job is to:
+
+- collect raw page objects from DOM and runtime captures
+- normalize noisy text
+- attach DOM and screenshot anchors
+- assemble structured evidence units
+- persist page-level evidence for later aggregation
+
+This layer is not the control loop. It is the memory and evidence substrate for later analysis.
+
+### 4. Aggregation and Reporting Layer
+
+This layer converts page-level evidence into cross-page artifacts such as:
+
+- inventory
+- sitemap
+- dataset rows
+- page insights
+- competitive-analysis summaries
+- markdown reports
+
+This is where the project differentiates from a generic browser transcript.
+
+## Core Runtime Loop
+
+The modern runtime should be thought of as:
+
+```text
+1. OBSERVE
+2. DECIDE
+3. ACT
+4. VALIDATE
+5. RE-OBSERVE
+6. COLLECT EVIDENCE
+7. CONTINUE OR STOP
+```
+
+Important notes:
+
+- route discovery is still present, but should no longer be the only decision source
+- page-level actions can be chosen before frontier navigation
+- repeated understanding after meaningful state changes is a first-class behavior
+- site memory should influence future action selection on the same domain
+- challenge states such as captcha or anti-bot should be surfaced explicitly
+
+### Budget Controls
+
+The current runtime uses two different exploration constraints:
+
+- `max_depth`
+  limits how many target layers away from the starting point a discovered target may be
+- `max_states`
+  limits the total number of captured states in a run
+
+These work together, but they are not the same thing:
+
+- `max_depth` constrains frontier expansion by level
+- `max_states` constrains the overall run budget regardless of where those states came from
+
+This means the system is not using a single "breadth limit"; it is using:
+
+- a structural boundary
+- plus a total capture budget
+
+## Evidence Collection Design
+
+The evidence layer should be designed around anchors, not just prose summaries.
+
+Each important page object should be preserved as an evidence unit with enough information to:
+
+- locate it again
+- inspect it manually
+- compare it later
+- cite it in a report
+
+### Evidence Flow
+
+```text
+raw DOM and screenshot
+  -> collectors
+  -> text normalization
+  -> DOM / visual anchoring
+  -> evidence assembly
+  -> page evidence pack
+  -> cross-page aggregation
+```
+
+### Evidence Unit Shape
+
+Each evidence unit should aim to preserve:
+
+- `kind`
+- `role`
+- `raw_text`
+- `normalized_text`
+- `url`
+- `page_type`
+- `locator`
+- `dom_path`
+- `bbox`
+- `html_fragment`
+- `screenshot_ref`
+- `confidence`
+- `observed_at_step`
+- `tags`
+
+The exact schema can evolve, but the core principle is stable:
+
+> Every important conclusion should be traceable back to anchored evidence.
+
+### Rule-Layer Guardrails
+
+The shared rule layer must stay general-purpose.
+
+That means:
+
+- prefer structural signals over site-specific text whenever possible
+- use text phrases as weak ranking hints, not hard allowlists, unless the phrase is truly generic UI chrome
+- do not add site-name-specific strings or one-site blacklists to core collectors or candidate extraction
+- when a special case is genuinely needed for one benchmark site, keep it in config or evaluation fixtures, not in the shared runtime heuristics
+
+In short:
+
+> The rule layer should generalize across websites, not be patched around the last validation target.
+
+### Evidence Categories
+
+#### Executable Evidence
+
+These support the agent loop and future replay:
+
+- CTA
+- nav item
+- tab
+- modal trigger
+- form field
+- submit action
+
+#### Content Evidence
+
+These support competitive analysis and product understanding:
+
+- hero headline
+- feature block
+- content section
+- docs section
+- pricing card
+- FAQ item
+
+#### Structural Evidence
+
+These support page interpretation and region-level reasoning:
+
+- page region
+- section group
+- table
+- list group
+- table of contents
+- layout pattern
+
+## Page Understanding vs Evidence Collection
+
+These are related but distinct concerns.
+
+### Agentic Loop
+
+The loop answers:
+
+> What should we do next?
+
+Examples:
+
+- follow a route
+- click a primary CTA
+- fill a form
+- switch a tab
+
+### Evidence Collection
+
+The evidence layer answers:
+
+> What did we find here that is worth preserving?
+
+Examples:
+
+- homepage entry points
+- docs navigation structure
+- product claims
+- onboarding prompts
+- pricing blocks
+
+The project should not force these concerns into one module.
+
+## Page Taxonomy
+
+The current high-level taxonomy is intentionally broader than the earlier admin-only framing.
+
+Current common page types:
+
+- `landing`
+- `content`
+- `docs`
+- `list`
+- `detail`
+- `form`
+- `dashboard`
+- `auth`
+- `modal`
+- `unknown`
+
+This taxonomy is useful because it changes both:
+
+- what evidence we try to preserve
+- how we interpret the page in the final analysis
+
+Notes:
+
+- `landing/content/docs` are important for general websites
+- `list/detail/form/dashboard` remain useful for application-style products
+- future categories may include `pricing`, `article`, `support`, `directory`, or `workspace`
+- categories should only be added when they materially change extraction or reporting behavior
+
+## Why Evidence Matters in an Agentic System
+
+More agentic control does not remove the need for structured evidence.
+
+Without the evidence layer, the system mostly produces:
+
+- action logs
+- screenshots
+- raw HTML
+
+That is enough for replay, but not enough for good competitive analysis.
+
+With a structured evidence layer, the system can additionally produce:
+
+- reusable page semantics
+- extracted entry points and content structures
+- grounded report claims
+- cross-page comparison inputs
+
+In short:
+
+- agentic control decides how to move
+- evidence collection decides what to keep
+
+## Why We Are Not Centering LangChain or LangGraph
+
+This project does not fundamentally need a framework-centric orchestration layer yet.
+
+Current reasons to stay framework-light:
+
+- the runtime is already naturally expressed as a small explicit state machine
+- Playwright control, artifact generation, and evidence persistence are easier to audit when the flow is direct
+- deterministic evidence capture is a core goal, and framework abstraction can hide important runtime details
+- the project still needs architectural clarity more than orchestration flexibility
+- broad agent frameworks often add cognitive overhead before they add clear product value
+
+That does not mean such frameworks are never useful. They may become helpful later if we need:
+
+- more complex branching or multi-agent coordination
+- resumable long-running workflows across many tools
+- graph-level observability beyond the current explicit engine
+
+For now, the chosen design is:
+
+- keep the browser runtime explicit
+- keep the state transitions explicit
+- keep the evidence pipeline explicit
+- add model assistance only where it clearly improves page understanding or reporting
 
 ## Folder Structure
 
-```
-frontend_mimic/
-├── config/
-│   ├── settings.yaml              # Default config
-│   └── settings.local.yaml        # User overrides (gitignored)
-├── src/
-│   ├── __init__.py
-│   ├── cli.py                     # Thin CLI entry point
-│   │
-│   ├── agent/                     # Core agent framework
-│   │   ├── __init__.py
-│   │   ├── engine.py              # State machine loop + orchestration
-│   │   ├── state.py               # AgentState, enums, frontier management
-│   │   └── logger.py              # Structured run log (JSONL)
-│   │
-│   ├── browser/                   # Execution layer
-│   │   ├── __init__.py
-│   │   ├── controller.py          # Playwright lifecycle (launch/close/navigate)
-│   │   └── authenticator.py       # Login flow (separated for reuse)
-│   │
-│   ├── observer/                  # Observation layer
-│   │   ├── __init__.py
-│   │   ├── extractor.py           # Page metadata, candidate detection
-│   │   ├── fingerprint.py         # DOM structural fingerprinting
-│   │   └── novelty.py             # Novelty scoring (cheap signals)
-│   │
-│   ├── analyzer/                  # Local analysis (no LLM)
-│   │   ├── __init__.py
-│   │   └── page_analyzer.py       # Component detection, design tokens, layout
-│   │
-│   ├── artifacts/                 # Output generation
-│   │   ├── __init__.py
-│   │   ├── manager.py             # Artifact save/load, path management
-│   │   ├── inventory.py           # Page/state inventory
-│   │   ├── sitemap.py             # Traversal graph / site map
-│   │   └── report.py              # Final consolidated report (markdown)
-│   │
-│   └── config.py                  # Pydantic models, YAML loader
-│
-├── output/                        # All run outputs (gitignored)
-│   ├── screenshots/
-│   ├── dom_snapshots/
-│   ├── artifacts/
-│   │   ├── inventory.json         # Page inventory
-│   │   ├── sitemap.json           # Traversal graph
-│   │   ├── run_log.jsonl          # Execution log
-│   │   └── analysis/              # Per-state analysis results
-│   │       ├── state_001.json
-│   │       └── ...
-│   └── reports/
-│       └── exploration_report.md  # Final human-readable report
-│
-├── requirements.txt
-├── pyproject.toml
-├── README.md
-└── ARCHITECTURE.md                # This file
-```
-
-## Core Data Models
-
-```python
-# ── Enums ──
-
-class AgentPhase(str, Enum):
-    INITIALIZE = "initialize"
-    AUTHENTICATE = "authenticate"
-    OBSERVE = "observe"
-    SELECT_ACTION = "select_action"
-    EXECUTE = "execute"
-    EVAL_NOVELTY = "eval_novelty"
-    ANALYZE = "analyze"
-    BACKTRACK_CONTINUE = "backtrack_continue"
-    FINALIZE = "finalize"
-
-class VisitStatus(str, Enum):
-    PENDING = "pending"
-    VISITING = "visiting"
-    SUCCESS = "success"
-    FAILED = "failed"
-    SKIPPED = "skipped"       # low novelty or budget exhausted
-
-class ActionType(str, Enum):
-    NAVIGATE = "navigate"     # click sidebar/nav link → new route
-    CLICK_ACTION = "click_action"  # click action dropdown item
-    OPEN_MODAL = "open_modal"      # click add/edit button → modal
-    EXPAND_ROW = "expand_row"      # expand table row
-    SWITCH_TAB = "switch_tab"      # click tab
-    SCROLL = "scroll"
-    BACKTRACK = "backtrack"
-
-class TargetType(str, Enum):
-    ROUTE = "route"           # URL/hash change
-    MODAL = "modal"           # dialog/drawer overlay
-    TAB_STATE = "tab_state"   # same page, different tab
-    EXPANDED_ROW = "expanded_row"
-    DROPDOWN = "dropdown"     # action menu opened
-    SECTION = "section"       # scroll-to section
-
-# ── Core Models ──
-
-class ExplorationTarget:
-    """Something the agent can navigate to or interact with."""
-    id: str                   # unique identifier
-    target_type: TargetType
-    locator: str              # CSS selector or URL
-    label: str                # human-readable name (menu text, button text)
-    parent_id: str | None     # parent target (for hierarchy)
-    depth: int                # distance from root
-    discovery_method: str     # "sidebar_menu", "action_dropdown", "tab_bar", etc.
-    metadata: dict            # extra info (href, aria-label, etc.)
-
-class StateSnapshot:
-    """A captured state of the browser at a point in time."""
-    id: str                   # e.g. "state_001"
-    target_id: str            # which ExplorationTarget produced this
-    url: str
-    title: str
-    timestamp: datetime
-    screenshot_path: str
-    html_path: str
-    dom_fingerprint: str      # structural hash for novelty comparison
-    visit_status: VisitStatus
-    novelty_score: float      # 0.0 = exact duplicate, 1.0 = completely new
-    parent_state_id: str | None
-    depth: int
-    retry_count: int
-    error: str | None
-    metadata: dict            # extracted signals (element counts, text density, etc.)
-
-class TraversalEdge:
-    """A transition between two states."""
-    from_state_id: str
-    to_state_id: str
-    action: ActionType
-    locator: str
-    label: str
-    timestamp: datetime
-
-class RunLogEntry:
-    """One line in the execution log."""
-    step: int
-    timestamp: datetime
-    phase: AgentPhase
-    action: str               # human-readable description
-    target: str               # what was acted on
-    result: str               # "success", "failed", "skipped", "retry"
-    reason: str               # why this result
-    duration_ms: int
-
-class AgentState:
-    """The agent's full runtime state (serializable for resume)."""
-    phase: AgentPhase
-    current_state_id: str | None
-    frontier: deque[str]      # BFS queue of target IDs
-    visited: set[str]         # target IDs already processed
-    skipped: set[str]         # target IDs skipped (low novelty / budget)
-    failed: dict[str, int]    # target_id → retry count
-    states: dict[str, StateSnapshot]
-    targets: dict[str, ExplorationTarget]
-    edges: list[TraversalEdge]
-    budget_remaining: int     # max states to capture
-    step_counter: int
+```text
+frontend_recon_agent/
+  config/
+    settings.yaml
+    settings.local.yaml
+  src/
+    cli.py
+    config.py
+    agent/
+      engine.py
+      state.py
+      logger.py
+    browser/
+      controller.py
+      authenticator.py
+    observer/
+      extractor.py
+      fingerprint.py
+      novelty.py
+    analyzer/
+      page_analyzer.py
+    vision/
+      client.py
+      prompts.py
+      types.py
+    extraction/
+      engine.py
+      list_extractor.py
+      detail_extractor.py
+      form_extractor.py
+      content_extractor.py
+      types.py
+    analysis/
+      competitive_report.py
+      synthesis_client.py
+      prompts.py
+    artifacts/
+      manager.py
+      inventory.py
+      sitemap.py
+      report.py
+  output/
+    screenshots/
+    dom_snapshots/
+    artifacts/
+    reports/
 ```
 
 ## Module Responsibilities
 
-### Deterministic (no LLM, always runs)
-
 | Module | Responsibility |
-|--------|---------------|
-| `agent/engine.py` | State machine loop. Calls other modules per phase. |
-| `agent/state.py` | AgentState management, frontier ops, visited tracking |
-| `agent/logger.py` | Append RunLogEntry to JSONL file |
-| `browser/controller.py` | Playwright launch/close, navigate, click, screenshot, save HTML |
-| `browser/authenticator.py` | Login flow using configured selectors |
-| `observer/extractor.py` | Find candidate interactions on current page (nav items, buttons, tabs, dropdowns) |
-| `observer/fingerprint.py` | Generate DOM structural hash (tag tree, ignoring text content) |
-| `observer/novelty.py` | Compare fingerprint to seen states, return novelty score 0-1 |
-| `analyzer/page_analyzer.py` | Component detection, design tokens, layout pattern extraction |
-| `artifacts/manager.py` | Save/load artifacts, manage output paths |
-| `artifacts/inventory.py` | Generate page inventory JSON from agent state |
-| `artifacts/sitemap.py` | Generate traversal graph JSON from targets + edges |
-| `artifacts/report.py` | Generate markdown report from all artifacts |
+|--------|----------------|
+| `agent/engine.py` | Orchestrates the explicit agent loop and finalization flow |
+| `browser/controller.py` | Executes browser actions and captures runtime artifacts |
+| `observer/extractor.py` | Detects candidate interactions and cheap page signals |
+| `vision/client.py` | Optional model-backed page understanding |
+| `analyzer/page_analyzer.py` | Local DOM/layout/component analysis |
+| `extraction/engine.py` | Dispatches page evidence extraction by strategy |
+| `extraction/content_extractor.py` | Preserves general-website content evidence such as hero, CTA, nav, and sections |
+| `analysis/competitive_report.py` | Aggregates page evidence into cross-page competitive-analysis artifacts |
+| `artifacts/report.py` | Produces human-readable exploration report |
 
-### Configurable (behavior changes via settings.yaml)
+## Current Artifact Set
 
-| Setting | What it controls |
-|---------|-----------------|
-| `budget.max_states` | Total states to capture before stopping |
-| `budget.max_depth` | Maximum BFS depth |
-| `budget.novelty_threshold` | Below this score, skip deep analysis |
-| `crawl.page_timeout` | How long to wait for page load |
-| `crawl.retry_count` | Max retries per target |
-| `interaction.selectors.*` | CSS selectors for detecting nav items, action buttons, modals, tabs |
-| `exploration.skip_patterns` | URL patterns to skip (logout, external links) |
-| `exploration.destructive_keywords` | Button text to never click |
+Important artifacts currently include:
 
-### LLM-assisted (only via conversation handoff)
+- `inventory.json`
+- `sitemap.json`
+- `coverage.json`
+- `site_memory.json`
+- `run_log.jsonl`
+- `dataset.jsonl`
+- `dataset_summary.json`
+- `extraction_failures.json`
+- `competitive_analysis.json`
+- `competitive_analysis.md`
+- `page_insights/*.json`
+- `vision/*.json`
 
-| What | When |
-|------|------|
-| Deep page interpretation | After run, when reviewing artifacts |
-| Architecture summarization | Final report enrichment |
-| Frontend replication | Separate conversation task |
-| Policy tuning | "Go back and also check X, Y, Z" |
+Together these artifacts form the review surface for later teardown and comparison work.
 
-## Data Flow
+## Near-Term Architecture Priorities
 
-```
-Engine.run()
-  │
-  ├─ INITIALIZE
-  │   └─ Controller.launch() → browser ready
-  │
-  ├─ AUTHENTICATE
-  │   └─ Authenticator.login() → logged in
-  │
-  ├─ OBSERVE ◄──────────────────────────────────────┐
-  │   ├─ Extractor.extract_candidates(page) → targets│
-  │   ├─ Fingerprint.compute(page) → hash            │
-  │   └─ AgentState.add_targets(targets)              │
-  │                                                    │
-  ├─ SELECT_ACTION                                     │
-  │   ├─ AgentState.pop_frontier() → next target       │
-  │   ├─ check budget remaining                        │
-  │   └─ if empty/exhausted → FINALIZE                 │
-  │                                                    │
-  ├─ EXECUTE                                           │
-  │   ├─ Controller.execute(target) → page state       │
-  │   ├─ Controller.capture_screenshot() → png         │
-  │   ├─ Controller.capture_html() → html              │
-  │   └─ ArtifactManager.save(snapshot)                │
-  │                                                    │
-  ├─ EVAL_NOVELTY                                      │
-  │   ├─ Fingerprint.compute(page) → new_hash          │
-  │   ├─ Novelty.score(new_hash, seen_hashes) → score  │
-  │   └─ if score < threshold → mark SKIPPED           │
-  │                                                    │
-  ├─ ANALYZE (if novelty > threshold)                  │
-  │   ├─ PageAnalyzer.analyze(html) → components, etc. │
-  │   └─ ArtifactManager.save_analysis(result)         │
-  │                                                    │
-  └─ BACKTRACK_CONTINUE ──────────────────────────────┘
-      ├─ if target was overlay → close it, restore parent
-      └─ continue to OBSERVE
+The most important next architectural steps are:
 
-  FINALIZE
-  ├─ Inventory.generate(agent_state) → inventory.json
-  ├─ Sitemap.generate(agent_state) → sitemap.json
-  ├─ Report.generate(all_artifacts) → exploration_report.md
-  └─ Logger.close() → run_log.jsonl complete
-```
-
-## Artifact Schemas
-
-### inventory.json
-```json
-[
-  {
-    "id": "state_001",
-    "target_id": "target_dashboard",
-    "url": "https://example.com/#/dashboard",
-    "title": "Dashboard",
-    "target_type": "route",
-    "parent_path": ["root"],
-    "depth": 0,
-    "discovery_method": "initial_page",
-    "visit_status": "success",
-    "novelty_score": 1.0,
-    "screenshot": "screenshots/001_dashboard.png",
-    "html": "dom_snapshots/001_dashboard.html",
-    "analysis": "artifacts/analysis/state_001.json",
-    "timestamp": "2026-03-22T14:30:00Z",
-    "retries": 0,
-    "error": null
-  }
-]
-```
-
-### sitemap.json
-```json
-{
-  "nodes": [
-    {"id": "target_dashboard", "label": "Dashboard", "type": "route", "depth": 0},
-    {"id": "target_business_trust", "label": "委托单列表", "type": "route", "depth": 1, "parent": "target_business"}
-  ],
-  "edges": [
-    {"from": "target_dashboard", "to": "target_business_trust", "action": "navigate", "label": "sidebar click"}
-  ],
-  "groups": [
-    {"id": "target_business", "label": "业务管理", "children": ["target_business_trust", "target_business_task", "target_business_qc"]}
-  ]
-}
-```
-
-### run_log.jsonl
-```json
-{"step": 1, "timestamp": "2026-03-22T14:30:00Z", "phase": "initialize", "action": "launch_browser", "target": "", "result": "success", "reason": "chromium started", "duration_ms": 2340}
-{"step": 2, "timestamp": "2026-03-22T14:30:02Z", "phase": "authenticate", "action": "login", "target": "https://example.com/#/login", "result": "success", "reason": "dashboard loaded", "duration_ms": 3210}
-{"step": 3, "timestamp": "2026-03-22T14:30:05Z", "phase": "observe", "action": "extract_candidates", "target": "dashboard", "result": "success", "reason": "found 12 nav items", "duration_ms": 450}
-```
-
-### exploration_report.md
-```markdown
-# Exploration Report
-
-## Run Summary
-- Target: https://example.com
-- Duration: 4m 32s
-- States captured: 45 / 60 budget
-- States skipped (low novelty): 8
-- Failed: 2 (timeout)
-- Unique routes: 28
-- Interaction states: 17
-
-## Site Architecture
-[tree of discovered menu structure]
-
-## Page Patterns
-- 24/28 routes use table + card + pagination layout
-- 16 pages have action dropdowns with 2-5 items
-- 12 pages have add/create modals
-- ...
-
-## Coverage Gaps
-- Settings page: access denied (role-restricted)
-- Report export: skipped (destructive keyword "导出")
-
-## Artifacts
-- inventory.json: 45 entries
-- sitemap.json: 28 nodes, 40 edges
-- run_log.jsonl: 156 steps
-- analysis/: 37 state analyses
-```
-
-## Implementation Plan
-
-### Phase 1: Data Models + State Machine Shell
-Files: `agent/state.py`, `agent/engine.py`, `agent/logger.py`, `config.py`
-- All Pydantic/dataclass models
-- Engine loop with phase transitions (no real browser yet, just structure)
-- JSONL logger
-- Updated config with budget/exploration settings
-
-### Phase 2: Execution Layer
-Files: `browser/controller.py`, `browser/authenticator.py`
-- Refactor existing controller — strip out BFS/interaction logic
-- Make it a clean "do this one thing" interface
-- Authenticator extracted from controller
-
-### Phase 3: Observation Layer
-Files: `observer/extractor.py`, `observer/fingerprint.py`, `observer/novelty.py`
-- Candidate extractor (find nav items, action buttons, tabs on current page)
-- DOM fingerprinting (structural hash)
-- Novelty scorer (compare hashes, return 0-1)
-
-### Phase 4: Wire It Together
-Files: `agent/engine.py` (complete), `cli.py`
-- Connect engine to real browser + observer
-- BFS frontier management
-- Retry/backtrack logic
-- CLI entry point
-
-### Phase 5: Artifact Generation
-Files: `artifacts/manager.py`, `artifacts/inventory.py`, `artifacts/sitemap.py`, `artifacts/report.py`
-- Inventory from agent state
-- Site map from targets + edges
-- Markdown report
-- Analysis outputs per state
-
-### Phase 6: Analyzer Integration
-Files: `analyzer/page_analyzer.py`
-- Port existing analyzer (component detection, design tokens)
-- Hook into ANALYZE phase
-- Per-state analysis output files
-
-### Phase 7: Testing + Polish
-- Test on labverix.com
-- Fix edge cases
-- Update README
-- Clean up old code
+1. Continue reducing route-first assumptions in the control loop.
+2. Expand page evidence collection for general websites.
+3. Improve text normalization and evidence cleanliness.
+4. Tighten the mapping between page taxonomy and extraction strategy.
+5. Keep reports grounded in anchored evidence rather than free-form summaries.

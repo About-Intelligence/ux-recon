@@ -174,3 +174,118 @@
 - Reframe the technical plan around a general browser-agent loop
 - Live-validate the API path on a simple public website
 - Define next-step handling for onboarding, registration, and anti-bot flows
+
+## Session 4 - 2026-04-09
+- Resumed work using the `planning-with-files` workflow
+- Re-read `task_plan.md`, `findings.md`, and `progress.md`
+- Ran session catch-up helper:
+  - it reported that Codex-native session parsing is not implemented, so no extra catch-up data was restored
+- Synced today's scope with the user:
+  - do not spend time validating `vision disabled` behavior
+  - do not spend time on graceful degradation for vision/API failures
+  - treat repeated vision/API failures as explicit runtime errors after retries
+  - use a representative general website instead of an admin/SaaS target
+  - prioritize proving that the final outputs are stronger than a plain browser transcript for competitive analysis
+- Inspected current `output/` artifacts and found a key mismatch:
+  - the old root `output/` report still reflected older admin-biased results
+  - newer eval outputs already showed stronger general-site page typing
+- Identified the main remaining quality gap:
+  - general-site page semantics had improved
+  - structured extraction still only supported `list/detail/form`
+  - this left `landing/content/docs` pages under-extracted
+- Implemented a new `content_blocks` extraction strategy for general websites
+  - added `src/extraction/content_extractor.py`
+  - wired `content_blocks` into extraction dispatch
+  - mapped `landing/content/docs` page types to the new strategy
+  - enriched competitive analysis with content-evidence summaries
+- Re-verified the codebase with `python -m compileall src`
+- Attempted a local smoke test in sandbox:
+  - Playwright launch failed with `PermissionError: [WinError 5] 拒绝访问`
+- Re-ran the smoke test outside the sandbox and completed a successful live pass against `python.org`
+  - command: `python -m src.cli --config config\\smoke_test_public.yaml --max-states 6 --max-depth 2 --clear`
+  - result: 6 states captured, 14 targets discovered, 6 extraction results, 4 successful `content_blocks` extractions
+- Confirmed the new outputs now preserve competitive-analysis evidence beyond a plain transcript:
+  - page semantics (`landing/content/docs`)
+  - content-block extraction (hero titles, CTAs, nav items, sections)
+  - final competitive-analysis summaries with evidence index references
+- Rewrote `ARCHITECTURE.md` to match the new direction:
+  - explicit agentic control loop
+  - evidence-collection layer as a first-class concept
+  - broader page taxonomy and general-site extraction framing
+  - documented why the project is staying framework-light instead of centering LangChain/LangGraph
+- Deleted `SMOKE_TEST.md` because the runbook was no longer worth keeping as a standalone file
+- Started the first evidence-layer refactor implementation:
+  - added `EvidenceUnit` to extraction types
+  - added `src/extraction/content_collectors.py`
+  - added `src/extraction/evidence_normalizer.py`
+  - refactored `content_extractor` into collector -> normalizer -> assembler flow
+  - preserved backward-compatible `records` summaries while adding richer `evidence_units`
+- Updated competitive-analysis reporting to surface:
+  - content-evidence summaries
+  - page-level evidence samples
+  - content-section entities derived from evidence units
+- Re-verified the codebase with `python -m compileall src`
+- Re-ran the live `python.org` validation after the schema refactor
+  - the run still completed successfully
+  - `dataset.jsonl` now includes anchored `evidence_units`
+  - `competitive_analysis.md` now includes an `Evidence Samples` section
+- Added a small follow-up normalization pass:
+  - preserved separators like `/`
+  - reduced more glyph noise
+  - improved titles such as `Build using make / make.bat`
+- Remaining cleanup items:
+  - a few mojibake strings still survive normalization
+  - navigation evidence is still a bit noisy
+  - some content pages still return empty evidence
+- Traced the worst remaining `downloads/about` failures to route resolution rather than extraction alone:
+  - some captured HTML snapshots were actually `404 Not Found`
+  - relative hrefs were being rediscovered from one host and later navigated from another
+- Fixed navigation discovery so route targets store absolute URLs at discovery time
+- Added a first pass of low-value nav filtering in both runtime candidate extraction and evidence collection:
+  - skipped labels such as `skip to content`, `menu`, `close`, `smaller`, `larger`, and `back to top`
+  - skipped empty/hash/javascript hrefs
+- Re-ran the live `python.org` validation after that fix
+  - captured routes now include the correct `www.python.org/downloads/`, `www.python.org/about/`, and `www.python.org/doc/`
+  - discovered targets dropped from 14 to 12
+  - extraction results improved to 5 successful and 1 empty
+- Tightened `src/extraction/content_collectors.py` again to:
+  - prioritize top-level nav selectors
+  - skip social/community follow links
+  - skip auth links already represented as CTAs
+- Re-ran the same live validation with the tightened collector
+  - `dataset_summary.json` stayed at 5 successful and 1 empty extraction
+  - `nav_item_count` dropped from 16 to 12 on the representative extracted pages
+  - `LinkedIn`, `Mastodon`, `Twitter`, `Chat on IRC`, `Sign In`, and `Sign Up / Register` were removed from `nav_item` evidence
+- Current highest-value follow-up is no longer nav noise reduction
+- The next likely target is either:
+  - improving section extraction coverage on general content pages
+  - or cleaning the last low-impact mojibake that still leaks into the final markdown report
+- Added an explicit anti-overfit guardrail after reviewing the shared heuristic layer:
+  - removed the site-specific `the python network` filter from shared runtime code
+  - removed hard CTA keyword gating and switched CTA collection to structure-first scoring with text as a soft hint
+  - documented the rule-layer constraint in `ARCHITECTURE.md`, `DISCUSSION_BRIEF.md`, and `task_plan.md`
+- Improved `content_section` extraction by combining:
+  - section/container selectors
+  - heading-driven container recovery
+  - structure-based section scoring
+- Reframed remaining admin-centric analysis language:
+  - `admin_maturity_score` -> `application_surface_score`
+  - synthesis prompt wording now describes a general website analysis pipeline
+  - `configuration_surface` analysis tag -> `interactive_surface`
+- Documented the runtime budget distinction:
+  - `max_depth` controls frontier expansion depth
+  - `max_states` controls total captured-state budget
+- Re-ran the public `python.org` validation after those changes
+  - successful extractions stayed at 5/6
+  - `content_section_count` rose sharply on content-heavy pages
+  - report wording now reflects the generalized analysis framing
+  - remaining tradeoff: CTA scoring is broader and now admits some promo/download-style links
+- Implemented a vision-assisted docs rescue path for weak section extraction:
+  - extraction now receives the persisted `vision_result`
+  - docs pages with no generic `content_section` hits can trigger a DOM-grounded rescue flow
+  - rescue targets grouped docs tables/lists and `p.biglink` docs index entries
+- Added `config/smoke_test_docs.yaml` for a docs-only validation target
+- Ran a focused docs-only smoke test against `https://docs.python.org/3/`
+  - previous weak point `content_section_count = 0` improved to `content_section_count = 10`
+  - evidence now includes both top-level docs groups and individual docs index entries
+  - remaining issue shifted from "missing sections" to "CTA/doc-nav role overlap"

@@ -38,6 +38,11 @@ In short:
 
 `observe -> decide -> act -> validate -> re-observe -> continue`
 
+Budget note:
+- `max_depth` limits how far discovered targets can expand from the starting point
+- `max_states` limits the total number of captured states in the run
+- together they control exploration scope, but they should not be confused with a single breadth cap
+
 ## 3. Core Architecture Choice
 For broader website coverage, strict `DOM-first` is no longer a sufficient control strategy.
 
@@ -154,6 +159,11 @@ The next extraction expansion should support more general public/product website
 - hero and CTA areas
 - navigation sections
 - resource cards and content blocks
+
+Important guardrail:
+- rule-based extraction should remain structure-first and site-agnostic
+- hard-coded text rules should be treated as soft hints, not the main decision boundary
+- benchmark-site quirks should not be patched directly into the shared extractor/runtime path
 
 ## 10. Acceptance Criteria
 The implementation direction is successful when:

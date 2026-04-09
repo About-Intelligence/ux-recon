@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urljoin
+
 from playwright.async_api import Page
 from rich.console import Console
 
@@ -16,6 +18,31 @@ class CandidateExtractor:
 
     def __init__(self, config: AppConfig):
         self.config = config
+
+    def _is_low_value_nav_label(self, label: str) -> bool:
+        normalized = " ".join(label.lower().split())
+        if normalized in {
+            "skip to content",
+            "close",
+            "menu",
+            "smaller",
+            "larger",
+            "back to top",
+        }:
+            return True
+        if normalized.replace(" ", "") in {"aa", "aaa"}:
+            return True
+        return False
+
+    def _is_low_value_nav_href(self, href: str) -> bool:
+        normalized = href.strip().lower()
+        if not normalized:
+            return True
+        if normalized in {"#", "javascript:;"}:
+            return True
+        if normalized.startswith("#"):
+            return True
+        return False
 
     async def _expand_submenus(self, page: Page) -> None:
         """Expand collapsed sub-menus so leaf items become visible."""
@@ -89,6 +116,11 @@ class CandidateExtractor:
                         if any(pat in href for pat in self.config.exploration.skip_patterns):
                             continue
 
+                        if self._is_low_value_nav_label(label):
+                            continue
+                        if self._is_low_value_nav_href(href):
+                            continue
+
                         # Dedup by href
                         if href and href in seen_hrefs:
                             continue
@@ -100,8 +132,10 @@ class CandidateExtractor:
                             continue
                         seen_labels.add(label)
 
-                        # Prefer href-based navigation
-                        locator = href if href and href.startswith(("http", "#", "/")) else f"{selector} >> nth={i}"
+                        # Resolve routes to absolute URLs at discovery time so later navigation
+                        # does not accidentally inherit the wrong current domain.
+                        absolute_href = urljoin(page.url, href) if href else ""
+                        locator = absolute_href if absolute_href else f"{selector} >> nth={i}"
 
                         target = ExplorationTarget.create(
                             target_type=TargetType.ROUTE,
@@ -110,7 +144,7 @@ class CandidateExtractor:
                             parent_id=parent_id,
                             depth=depth + 1,
                             discovery_method="nav_menu",
-                            metadata={"href": href, "original_selector": selector},
+                            metadata={"href": absolute_href or href, "original_selector": selector},
                         )
                         targets.append(target)
                     except Exception:

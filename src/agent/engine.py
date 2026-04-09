@@ -862,6 +862,8 @@ class ExplorationEngine:
             page_type=page_type,
             strategy=strategy,
             evidence_paths=evidence_paths,
+            page_insight=insight,
+            vision_result=self._vision_results.get(snapshot.id),
         )
         result.capture_label = capture_label
         result.capture_context = capture_context
@@ -1286,7 +1288,7 @@ class ExplorationEngine:
             score_value = 0
 
             if page_type == "dashboard":
-                if any(term in label for term in ["list", "manage", "admin", "setting", "config", "user"]):
+                if any(term in label for term in ["list", "manage", "workspace", "setting", "config", "user"]):
                     score_value += 3
             elif page_type == "landing":
                 if any(term in label for term in ["about", "docs", "download", "community", "learn", "get started"]):
@@ -1572,6 +1574,8 @@ class ExplorationEngine:
             return "detail_fields"
         if page_type in {"form", "modal", "auth"}:
             return "form_schema"
+        if page_type in {"landing", "content", "docs"}:
+            return "content_blocks"
         return "unknown"
 
     def _is_high_value_page(self, summary: DOMSummary, vision_result: VisionResult) -> bool:
@@ -1595,7 +1599,7 @@ class ExplorationEngine:
         if summary.has_table:
             tags.append("data_dense")
         if summary.has_form or vision_result.page_type in {"form", "modal", "auth"}:
-            tags.append("configuration_surface")
+            tags.append("interactive_surface")
         if vision_result.page_type in {"landing", "content", "docs"}:
             tags.append("content_surface")
         if vision_result.page_type == "docs":

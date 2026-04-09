@@ -10,7 +10,7 @@ def build_synthesis_system_prompt() -> str:
     """Return the system prompt for final LLM synthesis."""
     return (
         "You are a product strategist writing a concise, evidence-backed competitive analysis. "
-        "You receive deterministic crawl and extraction artifacts from an admin/SaaS website analysis pipeline. "
+        "You receive deterministic crawl and extraction artifacts from a general website analysis pipeline. "
         "Do not invent evidence. If evidence is weak, say so explicitly. "
         "Return strict JSON with keys: executive_summary, product_positioning, key_workflows, "
         "differentiators, risks_and_unknowns, recommended_followups, markdown_report. "

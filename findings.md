@@ -25,8 +25,228 @@
 ### Current gap relative to the new goal
 - The system now outputs competitive-analysis artifacts, but live validation with a real vision provider is still pending
 - Vision-assisted page understanding is integrated, but prompt quality and provider compatibility still need calibration on real targets
-- Structured extraction exists for list/detail/form patterns, but heuristics still need tuning on representative admin/SaaS pages
+- Structured extraction exists for list/detail/form patterns, but heuristics still need tuning on representative general websites
 - The competitive-analysis layer is functional, but final demo quality still depends on end-to-end validation and evidence quality checks
+
+## 2026-04-09 Scope Update
+
+### Validation scope narrowed by user
+- We are not treating `vision disabled` behavior or `vision API graceful degradation` as today's acceptance criteria
+- Runtime policy for vision/API failures is now:
+  - retry repeated calls
+  - if repeated attempts still fail, surface an explicit error
+- This means today's work should focus on artifact quality and general-website validation, not fallback UX
+
+### Validation target broadened beyond admin/SaaS
+- The next real validation target should be a more general website rather than an admin/SaaS product
+- This aligns with the current direction shift away from admin-first assumptions
+- Any remaining heuristics or report framing that still center admin/SaaS should be treated as quality debt
+
+### Main proof obligation for today
+- The most important thing to demonstrate is not merely that the browser run completes
+- We need to show that the repo's outputs are more useful for competitive analysis than a plain browser transcript because they preserve:
+  - structured page insights
+  - extracted entities and workflows
+  - evidence-backed summaries
+  - reusable artifacts for follow-up comparison
+
+## 2026-04-09 Live Validation Result
+
+### Representative general-site run completed
+- We ran a new live validation pass against `https://www.python.org/` with a 6-state budget
+- The run completed successfully after rerunning outside the sandbox so Playwright could launch Chromium
+- Final result:
+  - 6 states captured
+  - 14 targets discovered
+  - 6 extraction results generated
+  - 4 successful extractions
+
+### Highest-value gap found and fixed
+- The main weakness for general websites was not browser control
+- It was that page understanding had become broader (`landing/content/docs`), while structured extraction still only supported `list/detail/form`
+- This caused general-site pages to fall back to `unknown` extraction strategy or produce weak evidence
+- We fixed that by adding a new `content_blocks` extraction path for:
+  - hero titles
+  - primary CTAs
+  - navigation items
+  - content sections
+
+### Why the outputs are now stronger than a plain transcript
+- A plain transcript tells us the agent clicked `root -> Community -> Docs -> Downloads -> About -> Documentation`
+- The updated artifacts now additionally tell us:
+  - the site looks like `content_or_marketing`, not `admin_saas`
+  - the page mix is `landing/content/docs`
+  - the homepage exposes concrete entry points such as sign-in, sign-up, getting started, downloads, and documentation
+  - docs surfaces expose concrete informational sections and build/setup themes
+  - the final report can cite evidence rows instead of relying only on procedural narration
+
+### Current remaining limitations
+- Some extracted strings still contain noisy glyphs from page text normalization
+- Some pages still return empty `content_blocks` results, especially when their DOM is sparse or atypical
+- Category scoring still slightly overweights old admin-style signals through `admin_maturity_score`
+
+## 2026-04-09 Evidence Schema Refactor
+
+### What changed
+- We added a concrete `EvidenceUnit` structure to extraction outputs
+- The general-site extraction path is no longer a single monolithic extractor pass
+- It now follows:
+  - collectors
+  - normalizer
+  - assembler
+- This gives each extracted item:
+  - a kind
+  - a role
+  - raw and normalized text
+  - a locator
+  - a DOM path
+  - an HTML fragment
+  - a screenshot reference
+
+### Why this matters
+- The project now stores page-level evidence in a form that is closer to the intended long-term evidence model
+- Reports can now show sample evidence rows instead of only count summaries
+- The extraction layer is more aligned with the agentic architecture discussion:
+  - the loop decides what to do
+  - the evidence layer decides what to preserve
+
+### Live validation after the refactor
+- We reran the same `python.org` validation after the schema refactor
+- The live run still completed successfully
+- The resulting outputs now include:
+  - `evidence_units` inside `dataset.jsonl`
+  - `Evidence Samples` in `competitive_analysis.md`
+  - cleaner normalized titles such as:
+    - `Build using make / make.bat`
+    - `Getting started`
+    - `Introduction`
+
+### Remaining issues after the refactor
+- A few mojibake strings still remain, for example `All the Flow You鈥檇 Expect`
+- Some pages still produce empty evidence because current collectors are not broad enough for those DOM shapes
+- Navigation evidence is still somewhat noisy on pages with utility controls or accessibility toggles
+
+## 2026-04-09 Route Resolution and Nav Filtering Follow-Up
+
+### Root cause behind the old `downloads/about` empties
+- The weakest `downloads/about` results were not only an extraction-coverage issue
+- We found that some captured HTML snapshots for those routes were actually `404 Not Found` pages
+- The navigation extractor was storing relative hrefs and later navigation resolved them against the current page host
+- This produced wrong-domain URLs such as `docs.python.org/downloads/` instead of `www.python.org/downloads/`
+
+### Fix applied
+- Route candidates are now normalized to absolute URLs at discovery time
+- This keeps later navigation anchored to the source page where the link was discovered
+- We also added a first pass of low-value navigation filtering in both:
+  - `src/observer/extractor.py`
+  - `src/extraction/content_collectors.py`
+
+### Validation result after the fix
+- A fresh 2026-04-09 live run against `python.org` now reaches:
+  - `https://www.python.org/downloads/`
+  - `https://www.python.org/about/`
+  - `https://www.python.org/doc/`
+- Current result:
+  - 6 states captured
+  - 12 targets discovered
+  - 5 successful extractions
+  - 1 empty extraction
+
+### Main remaining issue
+- The biggest remaining evidence-quality issue is no longer route correctness
+- It is over-collection inside `nav_item` evidence:
+  - social links
+  - utility controls
+  - auth links duplicated across CTA and nav evidence
+- That is now the most valuable next cleanup target
+
+### Follow-up result after collector tightening
+- We tightened `content_collectors.py` to prioritize top-level navigation selectors instead of sweeping all `header a` links
+- We also explicitly filtered:
+  - social links
+  - chat/community links that behave like social follow-ons
+  - auth labels and auth URLs already represented as CTAs
+- A fresh live rerun showed the intended improvement:
+  - `nav_item_count` dropped from 16 to 12
+  - `LinkedIn`, `Mastodon`, `Twitter`, `Chat on IRC`, `Sign In`, and `Sign Up / Register` no longer appear as `nav_item` evidence
+- The remaining navigation evidence is still broad, but it is now much closer to a useful site-structure summary than before
+
+## 2026-04-09 Overfit Guardrail Update
+
+### New concern raised
+- Some of the latest rule-layer changes improved the `python.org` benchmark result, but they also risked overfitting the shared heuristics to one validation target
+- The most obvious smell was site-specific text appearing directly in shared filters
+
+### Updated stance
+- Shared collectors and candidate extractors should stay structure-first
+- Site-specific strings should not live in the core runtime path
+- Textual phrases can still exist, but should be treated as weak scoring hints rather than hard inclusion/exclusion rules whenever possible
+
+### Immediate fix applied
+- Removed the explicit `the python network` special case from shared low-value navigation filters
+- Removed hard CTA allowlist behavior and replaced it with a more general scoring approach:
+  - DOM position
+  - button/CTA class hints
+  - href validity
+  - short action-oriented labels as a soft boost
+- This keeps the rule layer broader and lowers the chance that future benchmark runs will distort the shared extractor
+
+## 2026-04-09 Section Coverage and Analysis Reframing
+
+### Section coverage improved
+- We broadened `content_section` extraction from narrow container selectors into heading-and-container assembly
+- This improved coverage materially on the representative `python.org` run:
+  - root: `content_section_count` 0 -> 9
+  - community: 0 -> 8
+  - about: 0 -> 7
+  - documentation: 0 -> 7
+- The remaining weak spot is `docs.python.org/3/`, which still produced 0 sections in this small-budget run
+
+### Analysis wording updated
+- The competitive-analysis layer no longer uses the old `admin_maturity_score` label
+- It now reports `application_surface_score`
+- The synthesis prompt was also updated so the final narrative no longer frames the whole system as an `admin/SaaS` pipeline
+
+### New residual risk
+- The broader CTA scorer now generalizes better than a hard keyword allowlist
+- But it also captures some promotional or download links that are not always the most important user entry points
+- This is a healthier failure mode than benchmark-specific overfit, but it is still a ranking-quality issue worth refining later
+
+## 2026-04-09 Vision-Assisted Docs Section Rescue
+
+### Why this was the right place to use vision
+- The weakest remaining page was `https://docs.python.org/3/`
+- Its screenshot was visually clear, and the existing vision output already described it as:
+  - a docs landing page
+  - with main blue link titles acting as documentation section navigation
+- So the best fit was not to replace DOM extraction, but to let vision trigger a DOM-grounded rescue path
+
+### What changed
+- We now pass the persisted `vision_result` into content extraction
+- When a page is classified as `docs` and generic section extraction yields no `content_section` units:
+  - vision hints can trigger a docs-specific rescue path
+  - the rescue path looks for:
+    - strong-label section headers followed by grouped docs tables/lists
+    - `p.biglink` style docs index entries with short descriptions
+- The resulting evidence still lands as anchored DOM evidence, not free-floating vision summaries
+
+### Targeted validation result
+- Added a docs-only smoke config targeting `https://docs.python.org/3/`
+- A focused rerun produced:
+  - `content_section_count = 10`
+  - docs section groups such as:
+    - `Documentation sections`
+    - `Indices, glossary, and search`
+    - `Project information`
+    - `Tutorial`
+    - `Library reference`
+    - `Language reference`
+
+### Remaining tradeoff
+- The fix solved the `0 sections` problem cleanly
+- But the page still shows another quality issue:
+  - CTA evidence is broad and overlaps with docs navigation links
+- That is now a separate ranking/role-classification problem rather than a section-detection failure
 
 ## Product Research Takeaways
 
