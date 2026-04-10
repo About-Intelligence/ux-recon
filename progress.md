@@ -1,464 +1,72 @@
 # Progress Log
 
-## Session 1 - 2026-03-19
-- Built initial project: login, BFS crawl, deep interaction, analysis, Vue generation
-- Captured 68 pages/interactions from labverix.com
-- Fixed 94 robustness issues
+## Current Status
 
-## Session 2 - 2026-03-22
-- Major refactor: linear script to agent framework (v2.0)
-- Built 7 phases: data models, execution, observation, engine, artifacts, analyzer, CLI
-- Live testing revealed 3 bugs:
-  1. Sub-menu titles matched as nav targets
-  2. No deduplication by href caused frontier explosion
-  3. Child menu-item filter skipped wrapped Element Plus nav items
-- Fixed the above issues and completed a successful 100-state run
-- Generated inventory, sitemap, run log, and exploration report
+- Project has moved from a deterministic admin-dashboard crawler toward a browser agent tailored for competitive-analysis evidence collection.
+- Core runtime, extraction, reporting, and first-pass auth flows are all implemented.
+- Recent work focused on demo hardening, route quality, screenshot/report usefulness, and human-assisted auth/challenge handling.
 
-## Session 3 - 2026-04-08
-- Re-read the codebase and confirmed the real runtime model:
-  - route-first BFS
-  - inline interaction exploration
-  - novelty-gated interaction capture
-- Shifted the project goal from generic recon to competitive-analysis generation
-- Researched browser-agent and extraction products:
-  - Stagehand
-  - Browser Use
-  - Skyvern
-  - Firecrawl
-  - OpenClaw
-  - Ponder
-- Defined the new positioning:
-  - better for evidence-backed competitive analysis
-  - not necessarily better for all browser automation
-- Added two future skill candidates to the plan:
-  - `competitive-analysis-review`
-  - `browser-agent-benchmark`
-- Implemented phase-1 foundation changes:
-  - added `vision` config section
-  - added `vision` and `page_insights` artifact directories
-  - added typed vision and competitive-analysis models
-  - added prompt builder and placeholder vision client
-- Implemented the first end-to-end vision-aware observation path:
-  - DOM summary generation in `OBSERVE`
-  - conditional vision call during observation
-  - page insight generation and persistence
-  - basic route reranking using page-type hints
-  - page semantics section in `exploration_report.md`
-- Replaced the placeholder vision client with a real OpenAI-compatible multimodal request path
-- Added environment/config support for:
-  - `VISION_API_KEY`
-  - `VISION_API_BASE_URL`
-  - configured `vision.api_key_env`
-- Built the structured extraction subsystem:
-  - list/table extractor
-  - detail/key-value extractor
-  - form/schema extractor
-  - extraction dispatcher
-- Wired extraction into the route capture lifecycle
-- Added dataset artifacts and report summary for extraction outputs
-- Added the competitive-analysis generator layer
-- Wired finalize to emit:
+## Major Completed Milestones
+
+### Foundation
+
+- Built the state-machine runtime, artifact system, analyzer, CLI, and BFS-style exploration baseline.
+- Added route deduplication, novelty scoring, coverage tracking, and structured run logs.
+
+### Competitive-Analysis Pivot
+
+- Added DOM summary plus optional vision understanding.
+- Added page insights and route reranking.
+- Added structured extraction outputs:
+  - `dataset.jsonl`
+  - `dataset_summary.json`
+  - `extraction_failures.json`
+- Added competitive-analysis outputs:
   - `competitive_analysis.json`
-  - `competitive_analysis.md`
-- Added heuristic product/category scoring and evidence aggregation
-- Fixed route extraction timing by generating a page insight on demand before extraction when needed
-- Updated README and `settings.local.yaml.example` to reflect vision, extraction, and competitive-analysis capabilities
-- Verified the codebase still compiles with `python -m compileall src`
-- Ran a focused code review and fixed the highest-value issues:
-  - corrected fallback from `page_type_vision = "unknown"` to DOM page types
-  - routed interaction captures through structured extraction
-  - switched vision understanding to viewport screenshots and enforced image resizing via `vision.max_image_side`
-  - removed internal extraction strategy names from competitive-analysis module inference
-  - deduplicated page insights by URL in report and competitive-analysis aggregation
-  - cleaned up duplicate `capture_viewport_screenshot()` definitions introduced during patching
-- Re-verified the codebase compiles with `python -m compileall src`
-- Ran a second pre-flight review and recorded remaining risks around:
-  - hash-route module inference for SPA-style admin products
-  - missing interaction identity in extraction artifacts
-  - potential vision-call amplification during interaction-heavy runs
-- Fixed that second review pass by:
-  - deriving feature modules from hash-router fragments when present
-  - adding `capture_label` / `capture_context` to extraction outputs
-  - making interaction extraction use DOM-only page understanding to avoid redundant multimodal calls
-- Re-verified the codebase compiles with `python -m compileall src`
-- Added `LEADER_DISCUSSION_BRIEF.md` as a discussion-ready project brief covering:
-  - architecture layers
-  - state-machine flow
-  - current implementation status
-  - API dependencies, especially vision provider requirements
-  - open risks and recommended next steps
-- Rewrote `LEADER_DISCUSSION_BRIEF.md` into a shorter leader-facing version:
-  - compressed the early framing sections
-  - reduced engineering-detail density
-  - emphasized end-to-end target workflow, API dependency notes, current status, and next steps
-- Added an optional final-report LLM synthesis layer:
-  - new `synthesis` config section
-  - OpenAI-compatible synthesis client
-  - synthesis prompts
-  - deterministic `competitive_analysis_structured.md`
-  - optional LLM-authored `competitive_analysis.md`
-- Rewrote `DISCUSSION_BRIEF.md` to reflect the updated position:
-  - `DOM-grounded, vision-augmented` instead of rigid `DOM-first`
-  - repeated page understanding as a future direction
-  - deterministic analysis plus optional LLM synthesis as the report model
-- Synced with project leadership and recorded a major direction shift:
-  - the current DOM-first / route-first mode is not sufficient
-  - the project now needs to evolve toward a more general browser agent
-  - expected targets may include registration-first LLM experience sites and ad-platform websites
-  - captcha / anti-bot handling is now an expected concern
-  - a live smoke test with the newly obtained API key is now a near-term priority
-- Started the first code-level pivot from pipeline to agent loop:
-  - added `task` configuration for goal, registration-flow allowance, and captcha policy
-  - introduced `ActionDecision` as a generic next-step planning object
-  - refactored the main engine loop from direct route selection into `observe -> decide -> execute`
-  - kept current route execution behavior intact as a transition step
-- Extended that first pivot with runtime behavior changes:
-  - added repeated page understanding after route capture and key interaction captures
-  - added first-pass captcha / anti-bot detection in the browser controller
-  - added pause-and-report behavior driven by `task.captcha_policy`
-- Expanded the decision layer beyond pure route traversal:
-  - added a runtime pending-decision queue
-  - page observation now plans page-level actions
-  - current planned actions include non-active tabs, add/create buttons, and onboarding/auth-style primary CTAs
-  - the agent loop now prioritizes pending page actions before falling back to route frontier navigation
-- Added a first-pass form action for broader onboarding flows:
-  - detects visible auth/onboarding forms
-  - heuristically fills visible inputs from task/login profile values
-  - submits the form and captures the resulting state
-- Rewrote `DISCUSSION_BRIEF.md` around the new direction:
-  - pipeline -> agent loop
-  - broader target websites
-  - DOM as grounding, not sole control logic
-  - captcha and human-in-the-loop as first-class concerns
-- Updated README language to reflect the ongoing shift toward a general browser agent
-- Reviewed `web-access` as an agent-design reference and decided to keep Playwright while borrowing higher-level control ideas instead of replacing the browser layer
-- Added explicit borrow points into the planning files:
-  - goal-driven action selection
-  - validate-after-action execution
-  - lightweight site memory
-  - challenge-as-state handling
-- Implemented those borrow points in the runtime:
-  - new task config for `goal_keywords`, `use_site_memory`, and `validate_action_outcomes`
-  - pending decisions are now scored against task goals and in-run domain memory instead of pure FIFO
-  - click and submit actions now validate that they caused meaningful state change
-  - the engine now records per-domain site memory and saves it as `site_memory.json`
-- Consolidated direction and implementation guidance into `DISCUSSION_BRIEF.md`
-- Added a safe local config scaffold at `config/settings.local.yaml` so local testing can be enabled without storing secrets in versioned defaults
-- Added `SMOKE_TEST.md` as the first live-validation runbook
-- Updated local testing defaults in `config/settings.local.yaml` to:
-  - `vision.model = gpt-5.4`
-  - `synthesis.model = gpt-5.4`
-- Updated the authenticator so public websites without credentials can be used for the first smoke test:
-  - no-credential mode now navigates directly to the target URL
-  - session checks and re-login no longer block public-site runs
-- Added `config/smoke_test_public.yaml` for the first public-site live validation run using `python.org`
-- Installed Playwright Chromium through the local Clash proxy on `127.0.0.1:7890`
-- Completed the first real end-to-end smoke test against `https://www.python.org/`
-  - browser launch succeeded
-  - no-login mode succeeded
-  - vision-enabled observation succeeded
-  - 8 states were captured under budget
-  - final artifacts were generated successfully
-- The smoke test surfaced the next important quality gap:
-  - heuristics are still too admin-biased for general public websites
-  - category guess, page typing, and framework inference need a broader website taxonomy
-- Implemented a broader public-site taxonomy and reduced admin bias:
-  - added `landing`, `content`, `docs`, and `auth`-aware classification paths
-  - made framework/UI-library inference more conservative
-  - added flexible normalization for loosely structured vision model outputs
-- Standardized the runtime model choice on `gpt-5.4` for vision and synthesis
-- Removed one-off vision-model probing and comparison code to keep the runtime path focused
+  - `competitive_analysis_structured.md`
+  - `competitive_analysis_readable.md`
+  - optional synthesized `competitive_analysis.md`
 
-## Next Up
-- Reframe the technical plan around a general browser-agent loop
-- Live-validate the API path on a simple public website
-- Define next-step handling for onboarding, registration, and anti-bot flows
+### Agentic Runtime Upgrades
 
-## Session 4 - 2026-04-09
-- Resumed work using the `planning-with-files` workflow
-- Re-read `task_plan.md`, `findings.md`, and `progress.md`
-- Ran session catch-up helper:
-  - it reported that Codex-native session parsing is not implemented, so no extra catch-up data was restored
-- Synced today's scope with the user:
-  - do not spend time validating `vision disabled` behavior
-  - do not spend time on graceful degradation for vision/API failures
-  - treat repeated vision/API failures as explicit runtime errors after retries
-  - use a representative general website instead of an admin/SaaS target
-  - prioritize proving that the final outputs are stronger than a plain browser transcript for competitive analysis
-- Inspected current `output/` artifacts and found a key mismatch:
-  - the old root `output/` report still reflected older admin-biased results
-  - newer eval outputs already showed stronger general-site page typing
-- Identified the main remaining quality gap:
-  - general-site page semantics had improved
-  - structured extraction still only supported `list/detail/form`
-  - this left `landing/content/docs` pages under-extracted
-- Implemented a new `content_blocks` extraction strategy for general websites
-  - added `src/extraction/content_extractor.py`
-  - wired `content_blocks` into extraction dispatch
-  - mapped `landing/content/docs` page types to the new strategy
-  - enriched competitive analysis with content-evidence summaries
-- Re-verified the codebase with `python -m compileall src`
-- Attempted a local smoke test in sandbox:
-  - Playwright launch failed with `PermissionError: [WinError 5] 拒绝访问`
-- Re-ran the smoke test outside the sandbox and completed a successful live pass against `python.org`
-  - command: `python -m src.cli --config config\\smoke_test_public.yaml --max-states 6 --max-depth 2 --clear`
-  - result: 6 states captured, 14 targets discovered, 6 extraction results, 4 successful `content_blocks` extractions
-- Confirmed the new outputs now preserve competitive-analysis evidence beyond a plain transcript:
-  - page semantics (`landing/content/docs`)
-  - content-block extraction (hero titles, CTAs, nav items, sections)
-  - final competitive-analysis summaries with evidence index references
-- Rewrote `ARCHITECTURE.md` to match the new direction:
-  - explicit agentic control loop
-  - evidence-collection layer as a first-class concept
-  - broader page taxonomy and general-site extraction framing
-  - documented why the project is staying framework-light instead of centering LangChain/LangGraph
-- Deleted `SMOKE_TEST.md` because the runbook was no longer worth keeping as a standalone file
-- Started the first evidence-layer refactor implementation:
-  - added `EvidenceUnit` to extraction types
-  - added `src/extraction/content_collectors.py`
-  - added `src/extraction/evidence_normalizer.py`
-  - refactored `content_extractor` into collector -> normalizer -> assembler flow
-  - preserved backward-compatible `records` summaries while adding richer `evidence_units`
-- Updated competitive-analysis reporting to surface:
-  - content-evidence summaries
-  - page-level evidence samples
-  - content-section entities derived from evidence units
-- Re-verified the codebase with `python -m compileall src`
-- Re-ran the live `python.org` validation after the schema refactor
-  - the run still completed successfully
-  - `dataset.jsonl` now includes anchored `evidence_units`
-  - `competitive_analysis.md` now includes an `Evidence Samples` section
-- Added a small follow-up normalization pass:
-  - preserved separators like `/`
-  - reduced more glyph noise
-  - improved titles such as `Build using make / make.bat`
-- Remaining cleanup items:
-  - a few mojibake strings still survive normalization
-  - navigation evidence is still a bit noisy
-  - some content pages still return empty evidence
-- Traced the worst remaining `downloads/about` failures to route resolution rather than extraction alone:
-  - some captured HTML snapshots were actually `404 Not Found`
-  - relative hrefs were being rediscovered from one host and later navigated from another
-- Fixed navigation discovery so route targets store absolute URLs at discovery time
-- Added a first pass of low-value nav filtering in both runtime candidate extraction and evidence collection:
-  - skipped labels such as `skip to content`, `menu`, `close`, `smaller`, `larger`, and `back to top`
-  - skipped empty/hash/javascript hrefs
-- Re-ran the live `python.org` validation after that fix
-  - captured routes now include the correct `www.python.org/downloads/`, `www.python.org/about/`, and `www.python.org/doc/`
-  - discovered targets dropped from 14 to 12
-  - extraction results improved to 5 successful and 1 empty
-- Tightened `src/extraction/content_collectors.py` again to:
-  - prioritize top-level nav selectors
-  - skip social/community follow links
-  - skip auth links already represented as CTAs
-- Re-ran the same live validation with the tightened collector
-  - `dataset_summary.json` stayed at 5 successful and 1 empty extraction
-  - `nav_item_count` dropped from 16 to 12 on the representative extracted pages
-  - `LinkedIn`, `Mastodon`, `Twitter`, `Chat on IRC`, `Sign In`, and `Sign Up / Register` were removed from `nav_item` evidence
-- Current highest-value follow-up is no longer nav noise reduction
-- The next likely target is either:
-  - improving section extraction coverage on general content pages
-  - or cleaning the last low-impact mojibake that still leaks into the final markdown report
-- Added an explicit anti-overfit guardrail after reviewing the shared heuristic layer:
-  - removed the site-specific `the python network` filter from shared runtime code
-  - removed hard CTA keyword gating and switched CTA collection to structure-first scoring with text as a soft hint
-  - documented the rule-layer constraint in `ARCHITECTURE.md`, `DISCUSSION_BRIEF.md`, and `task_plan.md`
-- Improved `content_section` extraction by combining:
-  - section/container selectors
-  - heading-driven container recovery
-  - structure-based section scoring
-- Reframed remaining admin-centric analysis language:
-  - `admin_maturity_score` -> `application_surface_score`
-  - synthesis prompt wording now describes a general website analysis pipeline
-  - `configuration_surface` analysis tag -> `interactive_surface`
-- Documented the runtime budget distinction:
-  - `max_depth` controls frontier expansion depth
-  - `max_states` controls total captured-state budget
-- Re-ran the public `python.org` validation after those changes
-  - successful extractions stayed at 5/6
-  - `content_section_count` rose sharply on content-heavy pages
-  - report wording now reflects the generalized analysis framing
-  - remaining tradeoff: CTA scoring is broader and now admits some promo/download-style links
-- Implemented a vision-assisted docs rescue path for weak section extraction:
-  - extraction now receives the persisted `vision_result`
-  - docs pages with no generic `content_section` hits can trigger a DOM-grounded rescue flow
-  - rescue targets grouped docs tables/lists and `p.biglink` docs index entries
-- Added `config/smoke_test_docs.yaml` for a docs-only validation target
-- Ran a focused docs-only smoke test against `https://docs.python.org/3/`
-  - previous weak point `content_section_count = 0` improved to `content_section_count = 10`
-  - evidence now includes both top-level docs groups and individual docs index entries
-  - remaining issue shifted from "missing sections" to "CTA/doc-nav role overlap"
-- Re-read the codebase after the latest leader-facing scope update and assessed the requested demo gaps against current implementation
-- Recorded a new Phase 11 focused on demo-oriented competitive-analysis hardening:
-  - rationale / ADR discipline
-  - competitive-analysis-first framing
-  - three access modes including email registration
-  - multi-site parallel orchestration
-  - screenshot selection and image-rich reports
-  - evaluation against human-written reports
-- Confirmed current readiness by requirement:
-  - public no-login flow: ready
-  - existing-account login: first-pass ready
-  - email registration flow: missing
-  - parallel multi-site execution: missing
-  - screenshot embedding in final reports: missing
-- Added two more scope conclusions after follow-up discussion:
-  - current markdown outputs are still engineering-facing summaries rather than strong human-readable competitive-analysis deliverables
-  - `max_states=6` should be treated only as smoke-test scale, not a realistic demo budget
-- Assessed runtime scaling implications:
-  - single-site execution is intentionally single-threaded today
-  - multi-site concurrency should be prioritized before intra-site concurrency
-  - if intra-site concurrency is later added, it should likely start with bounded parallel route exploration rather than parallel page-local interactions
-- Implemented the first readable-report productization pass:
-  - added `src/analysis/readable_report.py`
-  - added screenshot-aware report generation in finalization
-  - added capture metadata to route and interaction snapshots
-  - added `competitive_analysis_readable.md` as a new output artifact
-- Added `ARCHITECTURE_DECISIONS.md` to capture rationale and rejected alternatives for:
-  - human-readable reporting
-  - budget tiers
-  - concurrency sequencing
-  - screenshot selection
-- Added `config/smoke_test_public_nosynth.yaml` so report-generation smoke tests can run without final synthesis latency
-- Re-verified the codebase with `python -m compileall src`
-- Re-ran the public smoke test outside the sandbox with synthesis disabled
-  - browser run completed successfully
-  - 6 states were captured
-  - the new readable report was generated with embedded screenshot markdown
-- Upgraded the report-image strategy:
-  - archival captures remain full-page
-  - report-oriented screenshot paths now prefer viewport-style images for most pages
-  - root/home captures may still use a full-page report image
-- Re-ran a smaller public smoke test to verify the new image policy
-  - `competitive_analysis_readable.md` now points at `*_report.png` assets
-  - non-home report images are smaller viewport-style variants
-- Implemented first-pass multi-site orchestration:
-  - added `src/agent/batch_runner.py`
-  - added `src/analysis/comparison_report.py`
-  - added `--batch-config` CLI support
-  - added `config/smoke_test_batch.yaml`
-- Verified the batch path with a tiny two-site concurrent run
-  - both site runs completed successfully
-  - per-site outputs were isolated under `output/batch/python_compare/sites/...`
-  - a batch-level `comparison_report.md` was generated successfully
-- Implemented first-pass registration-mode support in `src/browser/authenticator.py`
-  - added `public`, `login`, `register`, and `auto` access modes
-  - added registration selectors and registration URL config fields
-- Added local mock registration fixtures under `mock_sites/register_demo/`
-- Attempted an end-to-end registration smoke test against the local mock site
-  - shell-level HTTP reachability succeeded
-  - Playwright still failed to reach the localhost target during the escalated browser run
-  - registration logic is implemented, but browser-level validation is still incomplete
-- Implemented run-profile separation:
-  - added `RunConfig` plus `apply_run_profile(...)`
-  - added `--profile` CLI support
-  - added `smoke_fast`, `demo`, and `full` behavior presets
-  - wired navigation strategy, page-action planning, interaction exploration, extraction, and report-screenshot capture to the profile layer
-- Added `run_timing_summary.json` via `RunLogger.summary()`
-- Added `config/smoke_test_public_fast.yaml` as a fast validation profile example
-- Ran a real `smoke_fast` validation against `python.org`
-  - run completed successfully in roughly 17-24 seconds
-  - 4 route states were captured
-  - extraction stayed disabled by profile
-  - timing summary showed the main remaining costs were observe + navigate, not finalization
-- Completed a bigger-picture status review after the latest implementation burst
-  - clearly separated:
-    - already-shipped demo capabilities
-    - partially implemented but not yet validated areas
-    - highest-priority next work
-  - current practical status:
-    - human-readable reporting with selected screenshots: shipped
-    - batch multi-site execution and first-pass comparison report: shipped
-    - access-mode model with registration path: implemented first pass, validation still incomplete
-    - run-profile separation and timing summaries: shipped
-  - highest-priority remaining work now looks like:
-    - real-world validation for registration mode on a controllable external target
-    - stronger analyst-style comparison reporting
-    - evaluation workflow against human-written competitive-analysis reports
-- Refreshed the decision log and planning records so recent shipped changes now
-  include explicit rationale and rejected alternatives
-  - expanded `ARCHITECTURE_DECISIONS.md` with ADRs for:
-    - demo-scoped access modes
-    - independent multi-site concurrency with post-run comparison
-    - runtime profiles plus timing summaries
-  - clarified that screenshot selection currently uses novelty only as one input,
-    not as a full measure of report importance
-  - recorded weakly justified technical choices that should be treated as
-    provisional:
-    - localhost mock registration as a proof target
-    - selector-driven registration as the long-term onboarding model
-    - novelty-weighted screenshot ranking without human calibration
-    - first-pass comparison report structure without human-report benchmarking
-- Implemented a first-pass human-assisted verification flow in the authenticator
-  - registration now detects likely OTP / verification steps
-  - the run can pause for terminal code entry or manual completion in the visible browser
-  - verification no longer has to be treated as immediate registration failure
-- Enforced visible browser operation during interactive auth/testing
-  - `--headless` is now treated as deprecated/ignored for this workflow
-- Ran a new visible-browser validation against `https://artificialanalysis.ai/`
-  - first run paused immediately because the anti-bot detector matched `cloudflare` text
-  - second run with `captcha_policy = ignore` proved the site was actually reachable and yielded 5 captured states:
-    - home
-    - hardware benchmark
-    - AI trends
-    - login
-    - an accidental `Terms-of-Use.pdf` transition
-  - strongest new product insight:
-    - the current anti-bot detector is too eager for this site and can produce false-positive pauses
-  - strongest new runtime issue:
-    - auth-page CTA planning is still too naive and can click a `Continue` action that navigates to a legal PDF instead of a meaningful onboarding step
-- Implemented a follow-up auth pass for `artificialanalysis.ai`-style unified auth pages
-  - `register` / `login` can now advance through email-entry-first auth steps
-  - auth-page public exploration no longer plans generic `Continue` clicks or nearby legal-link misclicks
-  - plain `cloudflare` text is no longer enough to trigger anti-bot pause
-- Added `config/smoke_test_artificialanalysis_register.yaml`
-- Ran a direct auth diagnostic against `artificialanalysis.ai/login?...`
-  - confirmed the page is `Log in or sign up`
-  - confirmed email submit leads to a magic-link state:
-    - `A login link has been sent... Please check your inbox`
-  - confirmed the runtime now recognizes that state as verification-required and pauses for manual assistance
-  - also fixed retry behavior so a manual abort is treated as an abort, not as a reason to keep retrying blindly
-- Tightened manual verification usability for real-email testing
-  - if the same email field is matched by overlapping selectors, it is no longer refilled unnecessarily
-  - manual verification now accepts a pasted verification URL / magic link in addition to a code or pure manual browser completion
-- Ran a real magic-link continuation attempt using the user-provided `artificialanalysis.ai` verification URL
-  - the runtime opened the link directly in a fresh visible browser session without re-triggering email login
-  - the site redirected to:
-    - `/login?...error=INVALID_TOKEN`
-  - conclusion:
-    - the provided magic link was already invalid / consumed by the time of execution
-    - continuation logic is wired, but this specific token could not be used to enter the product area
-- Returned to public-site analysis for `https://artificialanalysis.ai/` with a larger state budget
-  - ran `python -m src.cli --config config\smoke_test_artificialanalysis_demo.yaml --max-states 16 --max-depth 2 --clear`
-  - the run still terminated after only 4 captured states:
-    - home
-    - hardware benchmark
-    - AI Trends
-    - login
-  - important conclusion:
-    - `max_states` was not the limiting factor on this site
-    - the frontier emptied because route discovery only surfaced 4 public targets
-  - strongest follow-up implication:
-    - the next bottleneck for this site class is broader candidate extraction, especially menu/trigger/button-driven navigation rather than plain anchor discovery
-- Inspected the captured homepage DOM and route extractor to verify why public sub-entrances were missing
-  - confirmed the homepage contains many additional internal links such as `/models/...`, `/evaluations/...`, `/image/...`, `/video/...`, `/text-to-speech/...`, `/articles`, `/methodology`, `/faq`, and `/contact`
-  - confirmed `CandidateExtractor.extract_nav_targets()` currently scans only the configured `nav/sidebar` selectors
-  - confirmed the agent loop only adds discovered `ROUTE` targets from that extractor into the frontier
-  - conclusion:
-    - this is primarily an extractor-scope limitation, not a site-surface limitation
-- Reworked public route discovery to reduce dependence on framework-specific nav selectors
-  - `CandidateExtractor` now performs a DOM-wide visible `a[href]` scan in addition to the legacy nav pass
-  - same-site internal links are now filtered, prioritized, and capped before entering the frontier
-  - route metadata now carries region/context/priority so reranking can prefer main-content routes instead of top-nav-only routes
-  - submenu expansion was also broadened with safer generic `aria-expanded=false` navigation selectors
-- First validation of the broader extractor surfaced a second bug in action planning
-  - the run discovered 14 routes on the Artificial Analysis homepage, confirming that the new route extractor widened coverage
-  - but the public run also incorrectly planned a `fill_and_submit_form` action for `Submit a prompt` on the homepage and drifted into `/image/arena`
-  - that public-page form submission likely increased the chance of Cloudflare friction and definitely polluted the exploration path
-  - fixed by restricting generic form-submission planning to explicit auth surfaces only
-- Tightened the site-specific public demo config for `artificialanalysis.ai`
-  - disabled page-action planning
-  - disabled interaction exploration
-  - rationale:
-    - for this public competitive-analysis run, we want broader route coverage without opportunistically clicking or submitting on-page controls
+- Added goal-aware decision prioritization.
+- Added action-outcome validation.
+- Added site memory.
+- Added re-observation after meaningful state changes.
+- Added challenge detection with human-assisted pause/resume.
+- Added first-pass registration and magic-link verification handling.
+
+### Demo Hardening
+
+- Added architecture decision log.
+- Added readable screenshot-rich report generation.
+- Added run profiles and timing summaries.
+- Added batch multi-site execution and comparison reporting.
+- Broadened route discovery beyond top-nav-only extraction.
+
+### Recent Follow-Up Fixes
+
+- Kept cheap nav extraction active on later pages while caching only expensive hover-menu discovery.
+- Normalized deferred-route policy terms so auth-intent phrasing matches more reliably.
+- Replaced unconditional pre-observe overlay closing with lightweight overlay triage.
+
+## Latest Validation
+
+- Latest compile check: `python -m compileall src` passed.
+- No full automated regression suite exists yet.
+
+## Recommended Next Work
+
+- Run fresh smoke tests for:
+  - public `artificialanalysis` demo config
+  - registration-oriented `artificialanalysis` config
+- Rework external framing so the project is consistently presented as a competitive-analysis demo.
+- Improve comparison-report quality against human-written analyst outputs.
+
+## Latest Note
+
+- Simplified `findings.md`, `progress.md`, and `task_plan.md` into concise working-memory files.
+- Reviewed `D:\web_access\web-access` as an external reference.
+- Main conclusion:
+  - its strongest ideas are proxy/bootstrap ergonomics and domain experience reuse
+  - its CDP proxy model is materially different from the repo's current isolated Playwright-runner architecture

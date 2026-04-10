@@ -19,6 +19,7 @@ class CandidateExtractor:
 
     def __init__(self, config: AppConfig):
         self.config = config
+        self._seen_hover_nav_signatures: set[str] = set()
 
     def _is_low_value_nav_label(self, label: str) -> bool:
         normalized = " ".join(label.lower().split())
@@ -68,6 +69,264 @@ class CandidateExtractor:
         segment = path.split("/")[-1].replace("-", " ").replace("_", " ").strip()
         return segment[:80] if segment else "Route"
 
+    def _matches_hint(self, label: str, href: str, hints: list[str]) -> bool:
+        label_lower = " ".join(label.lower().split())
+        href_lower = href.lower()
+        return any(hint in href_lower or hint in label_lower for hint in hints)
+
+    def _goal_hints(self) -> list[str]:
+        return [hint.lower().strip() for hint in self.config.task.goal_keywords if hint and hint.strip()]
+
+    def _public_only_mode(self) -> bool:
+        return not self.config.task.allow_login_flows and not self.config.task.allow_registration_flows
+
+    def _normalize_label(self, label: str) -> str:
+        return " ".join(label.split()).strip()
+
+    def _route_defer_reason(self, label: str, href: str, region: str) -> str:
+        if self._public_only_mode():
+            if self._matches_hint(label, href, self.config.exploration.auth_risk_path_hints):
+                return "auth_risk"
+            if self._matches_hint(label, href, self.config.exploration.interactive_risk_path_hints):
+                return "interactive_risk"
+            if region == "nav":
+                content_signals = (
+                    self._matches_hint(label, href, self.config.exploration.high_value_path_hints)
+                    or self._matches_hint(label, href, self._goal_hints())
+                )
+                if not content_signals:
+                    return "global_nav"
+        return ""
+
+    def _nav_signature(self, targets: list[ExplorationTarget]) -> str:
+        parts = sorted(
+            f"{target.label.lower()}::{target.locator.lower()}"
+            for target in targets
+        )
+        return "|".join(parts[:12])
+
+    def _make_route_target(
+        self,
+        page_url: str,
+        href: str,
+        label: str,
+        parent_id: str | None,
+        depth: int,
+        discovery_method: str,
+        region: str,
+        context: str,
+        original_selector: str,
+        hover_path: list[str] | None = None,
+    ) -> ExplorationTarget:
+        normalized_href = self._normalize_href(page_url, href)
+        normalized_label = self._normalize_label(label)
+        return ExplorationTarget.create(
+            target_type=TargetType.ROUTE,
+            locator=normalized_href,
+            label=normalized_label,
+            parent_id=parent_id,
+            depth=depth + 1,
+            discovery_method=discovery_method,
+            metadata={
+                "href": normalized_href,
+                "region": region,
+                "context": context,
+                "defer_reason": self._route_defer_reason(normalized_label, normalized_href, region),
+                "priority": self._route_priority(normalized_label, normalized_href, region, context),
+                "original_selector": original_selector,
+                "hover_path": list(hover_path or []),
+            },
+        )
+
+    async def _collect_hover_trigger_specs(
+        self,
+        page: Page,
+        selectors: list[str],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        specs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for selector in selectors:
+            try:
+                loc = page.locator(selector)
+                count = await loc.count()
+            except Exception:
+                continue
+
+            for idx in range(min(count, limit * 3)):
+                try:
+                    item = loc.nth(idx)
+                    if not await item.is_visible():
+                        continue
+                    text = await item.text_content() or ""
+                    aria_label = await item.get_attribute("aria-label") or ""
+                    title = await item.get_attribute("title") or ""
+                    label = self._normalize_label(text or aria_label or title)
+                    if not label or len(label) > 60 or self._is_low_value_nav_label(label):
+                        continue
+                    href = await item.get_attribute("href") or ""
+                    key = f"{selector}|{idx}|{label.lower()}|{href.lower()}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    specs.append(
+                        {
+                            "selector": selector,
+                            "index": idx,
+                            "label": label,
+                            "href": href,
+                        }
+                    )
+                    if len(specs) >= limit:
+                        return specs
+                except Exception:
+                    continue
+        return specs
+
+    async def _hover_over_trigger(self, page: Page, selector: str, index: int) -> bool:
+        try:
+            target = page.locator(selector).nth(index)
+            if not await target.is_visible():
+                return False
+            await target.hover()
+            await page.wait_for_timeout(self.config.exploration.hover_menu_wait_ms)
+            return True
+        except Exception:
+            return False
+
+    async def _reset_hover_state(self, page: Page) -> None:
+        try:
+            await page.mouse.move(5, 5)
+            await page.wait_for_timeout(120)
+        except Exception:
+            pass
+
+    async def _collect_hover_revealed_routes(
+        self,
+        page: Page,
+        parent_id: str | None,
+        depth: int,
+        seen_hrefs: set[str],
+        seen_labels: set[str],
+        hover_path: list[str],
+    ) -> list[ExplorationTarget]:
+        routes: list[ExplorationTarget] = []
+        try:
+            anchors = await self._collect_anchor_candidates(page)
+        except Exception:
+            return routes
+
+        ranked: list[tuple[int, str, str, str, str]] = []
+        for anchor in anchors:
+            try:
+                if not bool(anchor.get("visible")):
+                    continue
+                href = str(anchor.get("hrefResolved") or anchor.get("hrefAttr") or "").strip()
+                href = self._normalize_href(page.url, href)
+                label = str(anchor.get("text") or anchor.get("ariaLabel") or anchor.get("title") or "").strip()
+                if not label:
+                    label = self._derive_label_from_href(href)
+                label = self._normalize_label(label)
+                if not label or len(label) > 80:
+                    continue
+
+                region = str(anchor.get("region") or "other")
+                context = str(anchor.get("context") or "other")
+                if region == "main":
+                    continue
+                if not self._is_viable_route_candidate(page.url, label, href):
+                    continue
+                if href in seen_hrefs or label in seen_labels:
+                    continue
+
+                ranked.append((self._route_priority(label, href, region, context), href, label, region, context))
+                seen_hrefs.add(href)
+                seen_labels.add(label)
+            except Exception:
+                continue
+
+        ranked.sort(key=lambda item: (-item[0], item[2].lower(), item[1]))
+        for priority, href, label, region, context in ranked[: self.config.exploration.max_route_candidates_per_page]:
+            target = self._make_route_target(
+                page_url=page.url,
+                href=href,
+                label=label,
+                parent_id=parent_id,
+                depth=depth,
+                discovery_method="hover_menu",
+                region=region,
+                context=context,
+                original_selector="hover_menu",
+                hover_path=hover_path,
+            )
+            target.metadata["priority"] = priority + 2
+            routes.append(target)
+        return routes
+
+    async def _explore_hover_menu_routes(
+        self,
+        page: Page,
+        parent_id: str | None,
+        depth: int,
+        seen_hrefs: set[str],
+        seen_labels: set[str],
+        selectors: list[str],
+        current_depth: int,
+        hover_path: list[str] | None = None,
+    ) -> list[ExplorationTarget]:
+        routes: list[ExplorationTarget] = []
+        if current_depth > self.config.exploration.hover_menu_max_depth:
+            return routes
+
+        hover_path = list(hover_path or [])
+        trigger_specs = await self._collect_hover_trigger_specs(
+            page,
+            selectors,
+            self.config.exploration.hover_menu_max_triggers,
+        )
+        for spec in trigger_specs:
+            next_path = hover_path + [str(spec["label"])]
+            if not await self._hover_over_trigger(page, str(spec["selector"]), int(spec["index"])):
+                continue
+            routes.extend(
+                await self._collect_hover_revealed_routes(
+                    page,
+                    parent_id,
+                    depth,
+                    seen_hrefs,
+                    seen_labels,
+                    next_path,
+                )
+            )
+            routes.extend(
+                await self._explore_hover_menu_routes(
+                    page,
+                    parent_id,
+                    depth,
+                    seen_hrefs,
+                    seen_labels,
+                    self.config.exploration.hover_menu_nested_selectors,
+                    current_depth + 1,
+                    next_path,
+                )
+            )
+            await self._reset_hover_state(page)
+
+        return routes
+
+    async def _top_nav_signature(self, page: Page) -> str:
+        specs = await self._collect_hover_trigger_specs(
+            page,
+            self.config.exploration.hover_menu_trigger_selectors,
+            self.config.exploration.hover_menu_max_triggers,
+        )
+        parts = sorted(
+            f"{self._normalize_label(str(spec['label'])).lower()}::{self._normalize_href(page.url, str(spec.get('href') or ''))}"
+            for spec in specs
+        )
+        return "|".join(parts[:12])
+
     def _route_priority(self, label: str, href: str, region: str, context: str) -> int:
         """Heuristic score for prioritizing public route candidates."""
         label_lower = " ".join(label.lower().split())
@@ -75,24 +334,30 @@ class CandidateExtractor:
         score = 0
 
         if region == "nav":
-            score += 3
+            score += 1
         elif region == "main":
-            score += 4
+            score += 5
         elif region == "footer":
-            score -= 1
+            score -= 3
 
         if context in {"table", "card", "section"}:
-            score += 2
+            score += 3
 
         for hint in self.config.exploration.high_value_path_hints:
             if hint in href_lower or hint in label_lower:
                 score += 4
 
+        if self._public_only_mode():
+            if self._matches_hint(label, href, self.config.exploration.auth_risk_path_hints):
+                score -= 9
+            if self._matches_hint(label, href, self.config.exploration.interactive_risk_path_hints):
+                score -= 10
+
         for hint in self.config.exploration.low_value_path_hints:
             if hint in href_lower or hint in label_lower:
                 score -= 4
 
-        if any(token in href_lower for token in ["/login", "/signin", "/signup", "/register"]):
+        if not self._public_only_mode() and any(token in href_lower for token in ["/login", "/signin", "/signup", "/register"]):
             score += 1
 
         return score
@@ -193,7 +458,14 @@ class CandidateExtractor:
         )
 
     async def extract_nav_targets(self, page: Page, parent_id: str | None, depth: int) -> list[ExplorationTarget]:
-        """Extract navigation menu items (sidebar, nav bar) as route targets."""
+        """Extract navigation menu items, caching only the expensive hover pass."""
+        top_nav_signature = await self._top_nav_signature(page)
+        should_run_hover_discovery = bool(top_nav_signature)
+        if top_nav_signature and top_nav_signature in self._seen_hover_nav_signatures:
+            should_run_hover_discovery = False
+        elif top_nav_signature:
+            self._seen_hover_nav_signatures.add(top_nav_signature)
+
         await self._expand_submenus(page)
 
         targets: list[ExplorationTarget] = []
@@ -243,20 +515,16 @@ class CandidateExtractor:
                         seen_labels.add(label)
 
                         targets.append(
-                            ExplorationTarget.create(
-                                target_type=TargetType.ROUTE,
-                                locator=absolute_href,
+                            self._make_route_target(
+                                page_url=page.url,
+                                href=absolute_href,
                                 label=label,
                                 parent_id=parent_id,
-                                depth=depth + 1,
+                                depth=depth,
                                 discovery_method="nav_menu",
-                                metadata={
-                                    "href": absolute_href,
-                                    "original_selector": selector,
-                                    "region": "nav",
-                                    "context": "nav",
-                                    "priority": self._route_priority(label, absolute_href, "nav", "nav"),
-                                },
+                                region="nav",
+                                context="nav",
+                                original_selector=selector,
                             )
                         )
                     except Exception:
@@ -264,6 +532,18 @@ class CandidateExtractor:
             except Exception:
                 continue
 
+        if should_run_hover_discovery:
+            targets.extend(
+                await self._explore_hover_menu_routes(
+                    page,
+                    parent_id,
+                    depth,
+                    seen_hrefs,
+                    seen_labels,
+                    self.config.exploration.hover_menu_trigger_selectors,
+                    current_depth=1,
+                )
+            )
         return targets
 
     async def extract_internal_link_targets(self, page: Page, parent_id: str | None, depth: int) -> list[ExplorationTarget]:
@@ -295,6 +575,9 @@ class CandidateExtractor:
                 region = str(anchor.get("region") or "other")
                 context = str(anchor.get("context") or "other")
 
+                if region == "nav":
+                    continue
+
                 if not self._is_viable_route_candidate(page.url, label, href):
                     continue
                 if href in seen_hrefs or label in seen_labels:
@@ -308,23 +591,19 @@ class CandidateExtractor:
 
         ranked_candidates.sort(key=lambda item: (-item[0], item[2].lower(), item[1]))
         for priority, href, label, region, context in ranked_candidates[: self.config.exploration.max_route_candidates_per_page]:
-            targets.append(
-                ExplorationTarget.create(
-                    target_type=TargetType.ROUTE,
-                    locator=href,
-                    label=label,
-                    parent_id=parent_id,
-                    depth=depth + 1,
-                    discovery_method="internal_link",
-                    metadata={
-                        "href": href,
-                        "region": region,
-                        "context": context,
-                        "priority": priority,
-                        "original_selector": "document.querySelectorAll('a[href]')",
-                    },
-                )
+            target = self._make_route_target(
+                page_url=page.url,
+                href=href,
+                label=label,
+                parent_id=parent_id,
+                depth=depth,
+                discovery_method="internal_link",
+                region=region,
+                context=context,
+                original_selector="document.querySelectorAll('a[href]')",
             )
+            target.metadata["priority"] = priority
+            targets.append(target)
 
         return targets
 

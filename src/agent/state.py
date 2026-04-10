@@ -175,6 +175,7 @@ class AgentState:
 
         # Frontier (BFS queue of target IDs)
         self.frontier: deque[str] = deque()
+        self.deferred_frontier: deque[str] = deque()
         self.pending_decisions: deque[ActionDecision] = deque()
 
         # Tracking sets
@@ -258,7 +259,10 @@ class AgentState:
         self._dedup_map[key] = target.id
         self.targets[target.id] = target
         if target.id not in self.visited and target.id not in self.skipped:
-            self.frontier.append(target.id)
+            if target.target_type == TargetType.ROUTE and target.metadata.get("defer_reason"):
+                self.deferred_frontier.append(target.id)
+            else:
+                self.frontier.append(target.id)
         return True
 
     def add_targets(self, targets: list[ExplorationTarget]) -> int:
@@ -272,6 +276,24 @@ class AgentState:
             if target_id not in self.visited and target_id not in self.skipped:
                 return self.targets.get(target_id)
         return None
+
+    def pop_deferred_frontier(self) -> ExplorationTarget | None:
+        """Pop next deferred target, used after primary exploration is exhausted."""
+        while self.deferred_frontier:
+            target_id = self.deferred_frontier.popleft()
+            if target_id not in self.visited and target_id not in self.skipped:
+                return self.targets.get(target_id)
+        return None
+
+    def frontier_size(self) -> int:
+        """Count both immediate and deferred route frontiers."""
+        return len(self.frontier) + len(self.deferred_frontier)
+
+    def has_primary_frontier(self) -> bool:
+        return bool(self.frontier)
+
+    def has_deferred_frontier(self) -> bool:
+        return bool(self.deferred_frontier)
 
     def add_decision(self, decision: ActionDecision) -> bool:
         """Add a planned decision if it has not already been executed or queued."""
@@ -353,7 +375,7 @@ class AgentState:
             "visited": len(self.visited),
             "skipped": len(self.skipped),
             "failed": len(self.failed),
-            "frontier_remaining": len(self.frontier),
+            "frontier_remaining": self.frontier_size(),
             "pending_decisions": len(self.pending_decisions),
             "states_captured": len(self.states),
             "budget_used": self.budget_total - self.budget_remaining,

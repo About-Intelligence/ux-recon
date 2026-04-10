@@ -278,4 +278,5 @@ For multi-site compare runs:
 - Browser runs stay visible during interactive auth and registration testing.
 - If a signup flow reaches an email-verification step, the run can pause in the terminal instead of exiting immediately.
 - You can type the verification code into the terminal so the agent fills it, paste the verification URL / magic link into the terminal, or complete the step manually in the visible browser and then press Enter to continue.
+- If a captcha / Cloudflare challenge appears and `captcha_policy` is `pause_and_report`, the runtime now freezes automation, keeps the same visible browser session open, and waits for you to clear the challenge before it resumes.
 - Optional selector knobs for this step are `verification_code_selector` and `verification_submit_selector`.

@@ -9,10 +9,25 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
+from src.config_layering import (
+    GENERAL_HIGH_VALUE_PATH_HINTS,
+    GENERIC_ACTION_BUTTON_SELECTORS,
+    GENERIC_ADD_BUTTON_SELECTORS,
+    GENERIC_EXPAND_SELECTORS,
+    GENERIC_MODAL_CLOSE_SELECTORS,
+    GENERIC_MODAL_SELECTORS,
+    GENERIC_NAV_SELECTORS,
+    GENERIC_STYLE_SELECTORS,
+    GENERIC_SUBMENU_EXPAND_SELECTORS,
+    GENERIC_TAB_SELECTOR,
+    apply_config_layering,
+)
+
 
 class TargetConfig(BaseModel):
     url: str
     dashboard_url: str = ""
+    site_pattern: str = "auto"
 
     @field_validator("url")
     @classmethod
@@ -31,8 +46,8 @@ class LoginConfig(BaseModel):
     username_selector: str = "input[type='text'], input[name='username'], input[name='email']"
     password_selector: str = "input[type='password']"
     submit_selector: str = (
-        "form button[type='submit'], form input[type='submit'], button[type='submit'], button:has-text('Login'), button:has-text('Sign in'), "
-        "button:has-text('登录'), button:has-text('Log in')"
+        "form button[type='submit'], form input[type='submit'], button[type='submit'], "
+        "button:has-text('Login'), button:has-text('Sign in'), button:has-text('Log in')"
     )
     success_indicator: str = ""
     registration_name_selector: str = (
@@ -51,7 +66,8 @@ class LoginConfig(BaseModel):
         "input[name='company'], input[name='organization'], input[name='org'], input[name='workspace']"
     )
     registration_submit_selector: str = (
-        "form button[type='submit'], form input[type='submit'], button[type='submit'], button:has-text('Sign up'), button:has-text('Get started'), "
+        "form button[type='submit'], form input[type='submit'], button[type='submit'], "
+        "button:has-text('Sign up'), button:has-text('Get started'), "
         "button:has-text('Create account'), button:has-text('Register')"
     )
     registration_success_indicator: str = ""
@@ -60,7 +76,8 @@ class LoginConfig(BaseModel):
         "input[name*='otp'], input[id*='otp'], input[inputmode='numeric']"
     )
     verification_submit_selector: str = (
-        "form button[type='submit'], form input[type='submit'], button[type='submit'], button:has-text('Verify'), button:has-text('Continue'), "
+        "form button[type='submit'], form input[type='submit'], button[type='submit'], "
+        "button:has-text('Verify'), button:has-text('Continue'), "
         "button:has-text('Confirm'), button:has-text('Activate')"
     )
 
@@ -95,88 +112,86 @@ class BudgetConfig(BaseModel):
     max_states: int = 100
     max_depth: int = 5
     retry_limit: int = 2
-    novelty_threshold: float = 0.12  # below this, skip capture entirely
+    novelty_threshold: float = 0.12
 
 
 class ExplorationConfig(BaseModel):
     """Controls what the agent explores and what it avoids."""
+
     skip_patterns: list[str] = Field(default_factory=lambda: [
         "/logout", "/api/", ".pdf", ".zip", "javascript:", "mailto:",
     ])
     destructive_keywords: list[str] = Field(default_factory=lambda: [
-        "删除", "delete", "remove", "drop", "destroy", "清空", "reset",
+        "delete", "remove", "drop", "destroy", "reset",
     ])
-    # Candidate detection: which elements to consider as navigation targets
-    nav_selectors: list[str] = Field(default_factory=lambda: [
-        "a:has(> .el-menu-item)",           # Element Plus: <a href><li class="el-menu-item">
-        ".el-menu-item a[href]",            # Element Plus: <li><a href>
-        ".ant-menu-item > a[href]",         # Ant Design
-        ".ant-menu-item",                   # Ant Design (no child a)
-        "nav a[href]", ".sidebar a[href]", ".side-nav a[href]",
-    ])
+    nav_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_NAV_SELECTORS))
     max_route_candidates_per_page: int = 40
-    high_value_path_hints: list[str] = Field(default_factory=lambda: [
-        "benchmark", "benchmarks", "model", "models", "evaluation", "evaluations",
-        "leaderboard", "arena", "trend", "trends", "pricing", "provider", "providers",
-        "article", "articles", "methodology", "guide", "docs", "documentation",
-        "research", "report", "reports", "image", "video", "speech", "audio",
-        "compare", "comparison", "faq",
+    high_value_path_hints: list[str] = Field(default_factory=lambda: list(GENERAL_HIGH_VALUE_PATH_HINTS))
+    auth_risk_path_hints: list[str] = Field(default_factory=lambda: [
+        "login", "log-in", "signin", "sign-in", "signup", "sign-up",
+        "register", "auth", "oauth", "account",
+    ])
+    interactive_risk_path_hints: list[str] = Field(default_factory=lambda: [
+        "playground", "studio", "chat", "generate", "prompt", "try",
     ])
     low_value_path_hints: list[str] = Field(default_factory=lambda: [
         "privacy", "terms", "legal", "cookie", "cookies", "mailto:",
         "x.com", "twitter.com", "linkedin.com", "discord.gg", "youtube.com",
     ])
-    # Selectors for collapsed sub-menus that need expanding before nav items are visible
-    submenu_expand_selectors: list[str] = Field(default_factory=lambda: [
-        ".el-sub-menu:not(.is-opened) > .el-sub-menu__title",
-        ".ant-menu-submenu:not(.ant-menu-submenu-open) > .ant-menu-submenu-title",
-        "nav button[aria-expanded='false']",
-        "nav [role='button'][aria-expanded='false']",
-        "header button[aria-expanded='false']",
-        "header [role='button'][aria-expanded='false']",
-        "[role='navigation'] button[aria-expanded='false']",
-        "[role='navigation'] [role='button'][aria-expanded='false']",
-        "[aria-haspopup='menu'][aria-expanded='false']",
+    submenu_expand_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_SUBMENU_EXPAND_SELECTORS))
+    hover_menu_trigger_selectors: list[str] = Field(default_factory=lambda: [
+        "nav a[href]",
+        "nav button",
+        "nav [role='button']",
+        "nav [role='menuitem']",
+        "header nav a[href]",
+        "header nav button",
+        "header nav [role='button']",
+        "header nav [role='menuitem']",
+        "[role='navigation'] a[href]",
+        "[role='navigation'] button",
+        "[role='navigation'] [role='button']",
+        "[role='navigation'] [role='menuitem']",
+        "[aria-haspopup='menu']",
     ])
+    hover_menu_nested_selectors: list[str] = Field(default_factory=lambda: [
+        "[role='menu'] a[href]",
+        "[role='menu'] button",
+        "[role='menu'] [role='menuitem']",
+        "[class*='menu'] a[href]",
+        "[class*='menu'] button",
+        "[class*='dropdown'] a[href]",
+        "[class*='dropdown'] button",
+        "[class*='popover'] a[href]",
+        "[class*='popover'] button",
+        "[data-radix-popper-content-wrapper] a[href]",
+        "[data-radix-popper-content-wrapper] button",
+        "[data-headlessui-state] a[href]",
+        "[data-headlessui-state] button",
+    ])
+    hover_menu_wait_ms: int = 250
+    hover_menu_max_triggers: int = 6
+    hover_menu_max_depth: int = 2
 
 
 class InteractionConfig(BaseModel):
     """Configurable selectors for deep interaction."""
-    action_button_selectors: list[str] = Field(default_factory=lambda: [
-        "button:has-text('操作')", "button:has-text('Actions')",
-        "button:has-text('Action')", ".el-dropdown:has-text('操作') button",
-        ".ant-dropdown-trigger", ".dropdown-toggle",
-    ])
-    add_button_selectors: list[str] = Field(default_factory=lambda: [
-        "button:has-text('添加')", "button:has-text('新增')",
-        "button:has-text('Add')", "button:has-text('Create')", "button:has-text('New')",
-    ])
+
+    action_button_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_ACTION_BUTTON_SELECTORS))
+    add_button_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_ADD_BUTTON_SELECTORS))
     dropdown_item_selector: str = (
         ".el-dropdown-menu__item:visible, .ant-dropdown-menu-item:visible, "
         ".dropdown-item:visible, [role='menuitem']:visible"
     )
-    # Strict dropdown item selector — excludes [role=menuitem] which may match sidebar nav
     dropdown_item_strict_selector: str = (
         ".el-dropdown-menu__item:visible, .ant-dropdown-menu-item:visible, "
         ".dropdown-item:visible"
     )
-    modal_selectors: list[str] = Field(default_factory=lambda: [
-        ".el-dialog:visible", ".el-drawer:visible",
-        ".ant-modal-wrap:visible", ".modal.show", "[role='dialog']:visible",
-    ])
-    modal_close_selectors: list[str] = Field(default_factory=lambda: [
-        ".el-dialog__headerbtn", ".el-drawer__close-btn",
-        ".ant-modal-close", ".modal .btn-close",
-        "[aria-label='Close']", ".el-icon--close",
-    ])
+    modal_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_MODAL_SELECTORS))
+    modal_close_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_MODAL_CLOSE_SELECTORS))
     overlay_selector: str = ".el-overlay, .ant-modal-mask, .modal-backdrop"
-    expand_selectors: list[str] = Field(default_factory=lambda: [
-        ".el-table__expand-icon", ".ant-table-row-expand-icon", "td.expand-icon",
-    ])
-    tab_selector: str = (
-        ".el-tabs__item:not(.is-active), .ant-tabs-tab:not(.ant-tabs-tab-active), "
-        ".nav-link:not(.active)"
-    )
+    expand_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_EXPAND_SELECTORS))
+    tab_selector: str = GENERIC_TAB_SELECTOR
 
 
 class BrowserConfig(BaseModel):
@@ -184,16 +199,7 @@ class BrowserConfig(BaseModel):
     viewport_width: int = 1920
     viewport_height: int = 1080
     slow_mo: int = 500
-    # CSS selectors for computed style extraction (used in analysis)
-    style_selectors: list[str] = Field(default_factory=lambda: [
-        "body", "header", "nav", "main", "footer",
-        "h1", "h2", "h3", "p", "a", "button",
-        ".sidebar", ".navbar", ".container", ".card",
-        ".el-dialog", ".el-drawer", ".el-form", ".el-table",
-        ".el-aside", ".el-header", ".el-main",
-        ".ant-layout-sider", ".ant-layout-header",
-        '[class*="sidebar"]', '[class*="navbar"]', '[class*="header"]',
-    ])
+    style_selectors: list[str] = Field(default_factory=lambda: list(GENERIC_STYLE_SELECTORS))
 
 
 class VisionConfig(BaseModel):
@@ -226,6 +232,13 @@ class OutputConfig(BaseModel):
     dom_snapshots_dir: str = "output/dom_snapshots"
     reports_dir: str = "output/reports"
     artifacts_dir: str = "output/artifacts"
+
+
+class LayeringConfig(BaseModel):
+    selector_preset: str = "general_web"
+    heuristic_preset: str = "competitive_analysis"
+    site_patterns_enabled: bool = True
+    site_patterns_dir: str = "config/site_patterns"
 
 
 class RunConfig(BaseModel):
@@ -264,6 +277,7 @@ class AppConfig(BaseModel):
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     run: RunConfig = Field(default_factory=RunConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    layering: LayeringConfig = Field(default_factory=LayeringConfig)
 
 
 def load_config(config_path: str | Path | None = None) -> AppConfig:
@@ -291,13 +305,13 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         raise SystemExit(f"Config file not found: {path}") from None
 
     config = AppConfig(**data)
+    apply_config_layering(config, project_root)
 
     if env_user := os.environ.get("MIMIC_USERNAME"):
         config.login.username = env_user
     if env_pass := os.environ.get("MIMIC_PASSWORD"):
         config.login.password = env_pass
 
-    # Create output directories
     for dir_path in [
         config.output.screenshots_dir,
         config.output.dom_snapshots_dir,
@@ -358,10 +372,6 @@ def apply_run_profile(config: AppConfig, profile_name: str | None) -> str:
 
     if selected == "demo":
         config.run.navigation_wait_until = "domcontentloaded"
-        config.run.enable_page_action_planning = True
-        config.run.enable_interaction_exploration = True
-        config.run.enable_extraction = True
-        config.run.capture_report_screenshots = True
         config.browser.slow_mo = min(config.browser.slow_mo, 100)
         config.crawl.wait_after_navigation = min(config.crawl.wait_after_navigation, 1200)
         config.crawl.wait_for_spa = min(config.crawl.wait_for_spa, 1200)
@@ -370,10 +380,6 @@ def apply_run_profile(config: AppConfig, profile_name: str | None) -> str:
 
     if selected == "full":
         config.run.navigation_wait_until = "networkidle"
-        config.run.enable_page_action_planning = True
-        config.run.enable_interaction_exploration = True
-        config.run.enable_extraction = True
-        config.run.capture_report_screenshots = True
         return selected
 
     raise SystemExit(f"Unsupported run profile: {selected}")

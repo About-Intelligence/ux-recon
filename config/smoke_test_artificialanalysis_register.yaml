@@ -11,7 +11,7 @@ task:
     - "orgs"
   allow_registration_flows: true
   allow_login_flows: true
-  captcha_policy: "ignore"
+  captcha_policy: "pause_and_report"
   human_assistance_allowed: true
   use_site_memory: true
   validate_action_outcomes: true
@@ -52,3 +52,8 @@ synthesis:
 
 run:
   profile: "demo"
+
+layering:
+  selector_preset: "general_web"
+  heuristic_preset: "competitive_analysis"
+  site_patterns_enabled: true

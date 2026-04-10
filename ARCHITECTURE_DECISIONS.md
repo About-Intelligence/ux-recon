@@ -479,3 +479,51 @@ not yet have strong enough evidence to treat as settled architecture.
 - Better next step:
   - evaluate and revise it using 2-3 real human-written comparison reports as
     reference material
+
+## ADR-008: Human-Assisted Challenge Freeze And Resume
+
+- Status: accepted
+- Date: 2026-04-09
+
+### Decision
+
+When captcha / anti-bot / Cloudflare-style challenges appear during browsing,
+the runtime should freeze automation, keep the same visible browser session
+open, let a human clear the challenge, and only then resume with a minimal
+challenge re-check.
+
+### Rationale
+
+- For this demo, some high-value public targets will occasionally challenge
+  automation even when login is not required.
+- Trying to keep the agent running during challenge resolution is operationally
+  wrong because even harmless-seeming behavior such as re-observation or
+  scrolling can interfere with challenge completion.
+- Freezing and resuming in the same session is the cleanest way to preserve:
+  - user trust
+  - session continuity
+  - auditability
+  - a non-adversarial posture toward anti-bot systems
+
+### Alternatives Considered
+
+#### Alternative A: End the run immediately when a challenge appears
+
+- Rejected because it wastes otherwise useful progress on public-site analysis
+  and makes challenged sites effectively unusable in demos.
+
+#### Alternative B: Keep the run alive and continue passive observation while the human solves the challenge
+
+- Rejected because the observed failure mode is precisely that continued page
+  interaction can invalidate or reset the verification flow.
+
+#### Alternative C: Try to avoid challenges through more human-like automated behavior
+
+- Rejected because the project should not depend on adversarial anti-detection
+  tactics to demonstrate value.
+
+### Known Weaknesses
+
+- This still depends on a human being present when the challenge appears.
+- Challenge clearance is currently validated through a minimal re-check rather
+  than a richer checkpoint/recovery protocol.

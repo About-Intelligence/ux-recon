@@ -8,11 +8,11 @@ task:
     - "benchmarks"
     - "models"
     - "pricing"
-    - "sign up"
-    - "login"
+    - "evaluations"
+    - "methodology"
   allow_registration_flows: false
   allow_login_flows: false
-  captcha_policy: "ignore"
+  captcha_policy: "pause_and_report"
   human_assistance_allowed: true
   use_site_memory: true
   validate_action_outcomes: true
@@ -61,3 +61,8 @@ run:
   profile: "demo"
   enable_page_action_planning: false
   enable_interaction_exploration: false
+
+layering:
+  selector_preset: "general_web"
+  heuristic_preset: "competitive_analysis"
+  site_patterns_enabled: true

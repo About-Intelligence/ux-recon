@@ -4,13 +4,14 @@
 target:
   url: "https://example.com/login"       # Target website login URL
   dashboard_url: ""                       # URL after login (leave empty to auto-detect)
+  site_pattern: "auto"                    # auto | off | path/to/pattern.yaml
 
 task:
   goal: "Explore the target website and understand its product surfaces."
   goal_keywords: []
   allow_registration_flows: true
   allow_login_flows: true
-  captcha_policy: "pause_and_report"      # pause_and_report | retry | ignore
+  captcha_policy: "pause_and_report"      # pause_and_report freezes automation for human challenge clearance | ignore
   human_assistance_allowed: true
   use_site_memory: true
   validate_action_outcomes: true
