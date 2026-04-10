@@ -33,10 +33,13 @@ class InventoryGenerator:
                 "visit_status": snapshot.visit_status.value,
                 "novelty_score": snapshot.novelty_score,
                 "screenshot": snapshot.screenshot_path,
+                "report_screenshot_path": snapshot.metadata.get("report_screenshot_path", ""),
                 "html": snapshot.html_path,
                 "timestamp": snapshot.timestamp,
                 "retries": snapshot.retry_count,
                 "error": snapshot.error,
+                "capture_label": snapshot.metadata.get("capture_label", ""),
+                "capture_context": snapshot.metadata.get("capture_context", ""),
             }
             entries.append(entry)
 

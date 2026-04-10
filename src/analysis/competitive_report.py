@@ -9,6 +9,12 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 from src.agent.state import AgentState
+from src.analysis.report_text import (
+    best_surface_label,
+    clean_report_text,
+    module_path_from_url,
+    route_family_from_url,
+)
 
 
 class CompetitiveSummary(BaseModel):
@@ -300,7 +306,12 @@ class CompetitiveReportGenerator:
             family = self._route_family_from_url(snapshot.url)
             counter[family] += 1
             total += 1
-            label = target.label if target else self._module_path_from_url(snapshot.url)
+            label = best_surface_label(
+                url=snapshot.url,
+                title=snapshot.title,
+                capture_label=target.label if target else "",
+                fallback=self._module_path_from_url(snapshot.url),
+            )
             if label:
                 examples.setdefault(family, [])
                 if label not in examples[family]:
@@ -337,24 +348,7 @@ class CompetitiveReportGenerator:
 
     def _module_path_from_url(self, url: str) -> str:
         """Infer a module path from either URL path or hash-router fragment."""
-        parsed = urlparse(url)
-        fragment = parsed.fragment.strip()
-        if fragment:
-            fragment_path = fragment.split("?", 1)[0].strip("/")
-            if fragment_path:
-                return fragment_path
-
-        path = parsed.path.strip("/")
-        if not path:
-            return "root"
-
-        parts = [part for part in path.split("/") if part]
-        if parts and parts[0].isdigit():
-            if len(parts) > 1:
-                return "/".join(parts[1:])
-            if parsed.netloc.startswith("docs."):
-                return "docs"
-        return path
+        return module_path_from_url(url)
 
     def _data_entities(self, extraction_results: dict[str, dict]) -> list[dict]:
         """Infer likely data entities from extraction outputs."""
@@ -815,13 +809,10 @@ class CompetitiveReportGenerator:
         return []
 
     def _route_family_from_url(self, url: str) -> str:
-        path = self._module_path_from_url(url)
-        if not path or path == "root":
-            return "root"
-        return path.split("/")[0]
+        return route_family_from_url(url)
 
     def _normalize_report_text(self, text: str) -> str:
-        return " ".join(text.split()).strip()
+        return clean_report_text(text)
 
     def _is_report_worthy_text(self, text: str) -> bool:
         if not text or len(text) < 2:

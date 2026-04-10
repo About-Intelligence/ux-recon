@@ -11,6 +11,7 @@ from rich.panel import Panel
 
 from src.agent.state import AgentPhase
 from src.analysis.readable_report import ReadableCompetitiveReportGenerator
+from src.analysis.ux_report import UserExperienceReportGenerator
 from src.artifacts.inventory import InventoryGenerator
 from src.artifacts.report import ReportGenerator
 from src.artifacts.sitemap import SitemapGenerator
@@ -104,6 +105,17 @@ class FinalizationRuntime:
                 self.engine.config.synthesis.readable_report_filename_md,
                 readable_markdown,
             )
+            ux_markdown = UserExperienceReportGenerator().generate(
+                self.engine.state,
+                competitive,
+                self.engine._page_insights,
+                self.engine._extraction_results,
+                self.engine.artifacts.reports_dir(),
+            )
+            self.engine.artifacts.save_text(
+                self.engine.config.synthesis.ux_report_filename_md,
+                ux_markdown,
+            )
 
             synthesized = await self.engine.synthesis.synthesize(
                 competitive.model_dump(),
@@ -165,6 +177,7 @@ class FinalizationRuntime:
             f"  run_observe_breakdown.json\n"
             f"  exploration_report.md\n"
             f"  {self.engine.config.synthesis.readable_report_filename_md}\n"
+            f"  {self.engine.config.synthesis.ux_report_filename_md}\n"
             f"  {len(self.engine._analysis_results)} state analyses\n"
             f"  {len(self.engine._page_insights)} page insights\n"
             f"  {len(self.engine._extraction_results)} extraction results\n"

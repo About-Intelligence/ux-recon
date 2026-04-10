@@ -6,7 +6,7 @@ Ship `frontend_recon_agent` as a credible competitive-analysis demo built on a P
 
 ## Current Phase
 
-Phase 16 - Report preparation and demo framing
+Phase 17 - Reviewer-style UX report orchestration
 
 ## Current Architecture
 
@@ -83,18 +83,30 @@ Phase 16 - Report preparation and demo framing
 - [x] Validate code completeness locally without rerunning live sites
 - **Status:** complete
 
+### Phase 16 - Single-Site UX Reporting Foundations
+- [x] Add manual-login continuation for auth-gated product reviews
+- [x] Add a dedicated `ux_report.md` output path
+- [x] Add workflow-aware screenshot metadata for UX reporting
+- [x] Support offline regeneration of UX reports from existing artifacts
+- [x] Validate the UX reporting path locally and with the `ponder.ing` artifact set
+- **Status:** complete
+
 ## Active Phase
 
-### Phase 16 - Report Preparation and Demo Framing
-- [ ] Update the discussion brief / report framing to reflect the current runtime more clearly
-- [ ] Summarize the strongest evidence that the project is now more usable for public-site comparison runs
-- [ ] Decide which residual risks to surface explicitly in the external report
+### Phase 17 - Reviewer-Style UX Report Orchestration
+- [x] Study `D:\web_access\web-access\ponder-ing-ux-report.md` and extract why it reads more like a reviewer memo than an artifact summary
+- [x] Add a judgment-first review-memo layer above raw artifacts
+- [x] Rewrite `ux_report.md` generation around strengths, issues, judgment, recommendations, and scope
+- [x] Normalize mojibake-prone labels and route names in regenerated reports
+- [x] Improve screenshot selection so visuals support findings rather than merely represent pages
+- [ ] Decide whether to port the same review-memo orchestration into the competitive-analysis report family
 - **Status:** in progress
 
 ## Open Risks
 
 - Registration flow quality is still less proven than public-site analysis.
-- Comparison reporting is better, but still needs calibration against strong human-written analyst memos.
+- Competitive-analysis reporting is better, but still needs calibration against strong human-written analyst memos.
+- UX reporting is now materially stronger, but it still depends on shallow task-flow coverage when the run budget is small.
 - No automated regression suite exists for the runtime-critical paths.
 - Competitive-analysis framing is still not fully consistent across all docs and outputs.
 - The new direct-URL runner is convenient, but it still inherits the assumptions of the chosen base config template.

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from src.agent.state import AgentState, StateSnapshot
 from src.analysis.competitive_report import CompetitiveAnalysis
+from src.analysis.report_text import best_surface_label, clean_report_text, display_label, route_family_from_url
 
 
 class ReadableCompetitiveReportGenerator:
@@ -89,7 +90,7 @@ class ReadableCompetitiveReportGenerator:
                     "",
                     f"![{highlight['title']}]({highlight['image_path']})",
                     "",
-                    f"*Why this matters:* {highlight['caption']}",
+                    f"*Why this page was kept:* {highlight['caption']}",
                 ])
         else:
             lines.append("")
@@ -119,7 +120,7 @@ class ReadableCompetitiveReportGenerator:
         top_family_share = int(float(top_family.get("share", 0.0)) * 100)
         concentration = (
             f" Most captured evidence came from {top_family_name} surfaces ({top_family_share}%)."
-            if top_family_name and top_family_name != "unknown" and top_family_share > 0
+            if top_family_name and top_family_name != "unknown" and top_family_share >= 40
             else ""
         )
         return (
@@ -269,7 +270,7 @@ class ReadableCompetitiveReportGenerator:
                 "score": score,
                 "title": title,
                 "summary": self._visual_summary(snapshot, extraction, page_type),
-                "caption": self._visual_caption(snapshot, extraction, page_type),
+                "caption": self._visual_caption(snapshot, insight, extraction, page_type),
                 "image_path": self._relative_path(screenshot_path, reports_dir),
             })
 
@@ -351,11 +352,12 @@ class ReadableCompetitiveReportGenerator:
 
     def _visual_title(self, state: AgentState, snapshot: StateSnapshot, page_type: str) -> str:
         target = state.targets.get(snapshot.target_id)
-        label = str(snapshot.metadata.get("capture_label", "")).strip()
-        if not label and target:
-            label = target.label
-        if not label:
-            label = self._display_label(page_type)
+        label = best_surface_label(
+            url=snapshot.url,
+            title=snapshot.title,
+            capture_label=str(snapshot.metadata.get("capture_label", "")).strip() or (target.label if target else ""),
+            fallback=page_type,
+        )
         if label == "root":
             domain = urlparse(snapshot.url).netloc or "homepage"
             return f"{domain} home"
@@ -368,16 +370,32 @@ class ReadableCompetitiveReportGenerator:
             f"with novelty score **{snapshot.novelty_score:.2f}**. {evidence_text}"
         )
 
-    def _visual_caption(self, snapshot: StateSnapshot, extraction: dict, page_type: str) -> str:
+    def _visual_caption(self, snapshot: StateSnapshot, insight: dict, extraction: dict, page_type: str) -> str:
         highlights = self._notable_items(extraction)
         if highlights:
             return (
                 f"Selected as a strong {self._display_label(page_type)} example. "
                 f"Notable evidence includes {highlights}."
             )
-        return (
-            f"Selected to preserve a visually representative {self._display_label(page_type)} surface "
-            "for later comparison."
+        interaction_hints = [
+            self._clean_text(str(item.get("label", "")))
+            for item in (insight.get("interaction_hints") or [])[:2]
+        ]
+        interaction_hints = [item for item in interaction_hints if item]
+        if interaction_hints:
+            return "Observed next-step cues include " + ", ".join(f"`{item}`" for item in interaction_hints) + "."
+
+        fallback = {
+            "dashboard": "Keeps the main workspace frame, navigation model, and primary input area visible for comparison.",
+            "detail": "Shows a deeper leaf surface so we can compare how the product handles billing, settings, or focused detail views.",
+            "list": "Shows how the product presents browsable items rather than only a landing or editor surface.",
+            "form": "Shows how much setup or structured input is required before a user can continue.",
+            "auth": "Shows the access gate and how much friction exists before the product experience begins.",
+            "modal": "Preserves an interrupting surface that likely changes task flow or context.",
+        }
+        return fallback.get(
+            page_type,
+            "Keeps a distinct captured surface in the report so later comparisons are not based on one screen type alone.",
         )
 
     def _page_type(self, insight: dict, extraction: dict) -> str:
@@ -443,14 +461,10 @@ class ReadableCompetitiveReportGenerator:
         return os.path.relpath(path, reports_dir).replace("\\", "/")
 
     def _display_label(self, value: str) -> str:
-        return value.replace("_", " ").strip() if value else "unknown"
+        return display_label(value)
 
     def _route_family_from_url(self, url: str) -> str:
-        parsed = urlparse(url)
-        path = parsed.path.strip("/")
-        if not path:
-            return "root"
-        return path.split("/")[0]
+        return route_family_from_url(url)
 
     def _clean_text(self, text: str) -> str:
         normalized = " ".join(text.split()).strip()
@@ -459,3 +473,6 @@ class ReadableCompetitiveReportGenerator:
         if any(marker in normalized for marker in ["�", "鈱", "锟"]):
             return ""
         return normalized
+
+    def _clean_text(self, text: str) -> str:
+        return clean_report_text(text)

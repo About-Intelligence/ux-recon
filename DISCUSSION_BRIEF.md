@@ -1,185 +1,365 @@
-# Frontend Recon Agent: Direction and Implementation Plan
+# Frontend Recon Agent Presentation Brief
 
-## 1. Current Direction
-The project is no longer framed as a narrow admin-site analysis pipeline. It is being evolved into a more general browser agent that can:
+## 1. The Short Version
 
-- take a target URL and a high-level goal
-- complete multi-step flows such as sign-up, sign-in, onboarding, and guided entry
-- continue exploring and understanding the product surface after entry
-- preserve evidence, structured outputs, and final analysis artifacts when useful
+`frontend_recon_agent` is a Playwright-based browser agent for competitive website analysis.
 
-We will continue to use Playwright as the browser execution layer. The main change is in the control layer: moving from a fixed pipeline to an agent loop.
+Its core value is not just that it can browse websites. Its value is that it can:
 
-## 2. Target End-to-End Flow
-The intended full loop is:
+- explore a site with an explicit agent loop
+- preserve grounded evidence while it explores
+- turn that evidence into structured and readable competitive-analysis outputs
 
-1. Open the target site
-2. Observe the current page
-3. Decide the next action based on:
-   - task goal
-   - current state
-   - what has already worked on the same site
-4. Act:
-   - navigate
-   - click
-   - fill forms
-   - submit
-   - switch tabs
-   - open modals
-5. Validate whether the action actually changed state
-6. Re-observe after meaningful state changes
-7. Continue until:
-   - the goal is complete
-   - budget is exhausted
-   - a blocking challenge appears
-8. Save evidence, structured outputs, and final analysis
+The most important framing is:
 
-In short:
+> This is not a screenshot bot and not just a crawler. It is an evidence-backed browser analysis system.
 
-`observe -> decide -> act -> validate -> re-observe -> continue`
+## 2. The Problem We Are Solving
 
-Budget note:
-- `max_depth` limits how far discovered targets can expand from the starting point
-- `max_states` limits the total number of captured states in the run
-- together they control exploration scope, but they should not be confused with a single breadth cap
+Most website analysis pipelines fall into one of two buckets:
 
-## 3. Core Architecture Choice
-For broader website coverage, strict `DOM-first` is no longer a sufficient control strategy.
+- they are deterministic crawlers that collect pages but do not understand product surfaces well
+- or they are highly agentic systems that act flexibly but leave weak audit trails
 
-The working direction is:
+For competitive analysis, both are incomplete.
 
-**DOM-grounded, vision/LLM-guided**
+What we actually need is a system that can:
 
-Meaning:
-- DOM remains important for execution and extraction
-- vision/LLM helps with page understanding and semantic classification
-- browser control stays deterministic where possible
-- the system should not assume every site is an admin dashboard
+- move through real websites
+- handle more than static link collection
+- preserve enough evidence to justify later claims
+- produce outputs that are useful to both engineers and stakeholders
 
-## 4. What We Are Borrowing
-The system keeps Playwright, but borrows several higher-level browser-agent ideas:
+## 3. Our Positioning
 
-### Goal-driven control
-- actions are not executed in pure FIFO order
-- goal-relevant actions are prioritized
+The project started closer to an admin-dashboard exploration tool.
 
-### Validate-after-action
-- clicks and submits are not assumed successful
-- the runtime checks whether state changed meaningfully
+The current positioning is broader:
 
-### Site memory
-- the run records what tends to work on the current domain
-- examples:
-  - selector success/failure
-  - label success/failure
-  - action-type success/failure
-  - challenge events
+- general public websites, not just admin apps
+- agentic control loop, not only frontier crawling
+- evidence-first outputs, not only automation traces
+- competitive-analysis reports, not only engineering logs
 
-### Challenge as normal state
-- captcha / anti-bot is treated as a first-class runtime state
-- the current policy is pause-and-report rather than blind retry
+So the right mental model is:
 
-## 5. Current Implementation State
-The current runtime already includes:
+**browser agent + evidence pipeline + reporting layer**
 
-- Playwright browser control
-- no-login public-site support
-- task-aware `observe -> decide -> execute` loop
-- repeated page understanding after important state changes
-- lightweight site memory persisted as `site_memory.json`
-- optional vision-enhanced page understanding
-- structured extraction
-- final analysis artifacts and optional LLM synthesis
+## 4. How The System Works
 
-## 6. Vision and LLM Usage
-The system uses model APIs in two places:
+There are two cooperating flows.
 
-### Vision
-Purpose:
-- classify current page
-- detect major regions
-- identify interaction hints
-- improve page understanding beyond raw DOM
+### Agent Loop
 
-Decision:
-- `vision.model` is now standardized to `gpt-5.4`
+```text
+observe -> decide -> act -> validate -> re-observe
+```
 
-### Final synthesis
-Purpose:
-- turn structured evidence into a more readable final analysis
+This is how the system decides what to do next.
 
-Decision:
-- `synthesis.model` remains `gpt-5.4`
+### Evidence Flow
 
-Important note:
-- these are API-backed integrations
-- normal chat subscriptions are not enough for runtime use
+```text
+collect -> normalize -> anchor -> assemble -> aggregate -> report
+```
 
-## 7. Main Implementation Priorities
-The next important work is:
+This is how the system decides what to keep.
 
-1. Continue weakening route-first assumptions
-2. Improve repeated understanding after state changes
-3. Strengthen sign-up / sign-in / onboarding handling
-4. Improve handoff / resume around captcha and anti-bot
-5. Expand extraction and analysis beyond admin-style pages
+That distinction matters because browsing alone is not enough for a credible analysis product.
 
-## 8. General Website Taxonomy
-The project now uses a broader website taxonomy instead of forcing most pages into `list/form/dashboard`.
+## 5. Why The Architecture Matters
 
-Current high-level page types include:
-- `landing`
-- `content`
-- `docs`
-- `list`
-- `detail`
-- `form`
-- `dashboard`
-- `auth`
-- `modal`
-- `unknown`
+The key design choice is:
 
-This broader taxonomy is important because target sites may include:
-- public product sites
-- content-heavy sites
-- docs portals
-- registration-gated applications
-- growth / ad-platform websites
+**DOM-grounded, vision-guided**
 
-## 9. Extraction Direction
-The original extraction bias was too tied to admin-style surfaces.
+That means:
 
-Current structured extraction exists for:
-- list/table
-- detail/key-value
-- form/schema
+- Playwright stays the execution layer
+- DOM and browser state remain the grounding layer
+- vision helps interpret page structure and product surfaces
+- final reporting is built on preserved evidence
 
-The next extraction expansion should support more general public/product websites, especially:
-- landing/content/docs surfaces
-- hero and CTA areas
-- navigation sections
-- resource cards and content blocks
+This gives us a middle path:
 
-Important guardrail:
-- rule-based extraction should remain structure-first and site-agnostic
-- hard-coded text rules should be treated as soft hints, not the main decision boundary
-- benchmark-site quirks should not be patched directly into the shared extractor/runtime path
+- more flexible than a pure DOM crawler
+- more auditable than a model-only agent
 
-## 10. Acceptance Criteria
-The implementation direction is successful when:
+## 6. What The System Can Do Today
 
-- the agent can run end-to-end on both public and gated sites
-- it can handle sign-up / sign-in / onboarding flows more reliably
-- it produces evidence-backed outputs, not just transcripts
-- it no longer forces general websites into admin-only taxonomy
-- it remains explainable and auditable
+Current implemented capabilities:
 
-## 11. One-Line Summary
-This project is now a Playwright-based general browser agent with:
+- public-site exploration
+- first-pass login and registration support
+- repeated understanding after meaningful state changes
+- challenge detection with human-assisted freeze and resume
+- site memory within a run
+- structured extraction and aggregation
+- readable competitive-analysis reports
+- multi-site comparison workflow
 
-- goal-driven control
-- validate-after-action behavior
-- repeated understanding
-- site memory
-- API-backed vision and synthesis
-- evidence-preserving outputs
+
+## 7. What Makes It More Than A Crawler
+
+There are four differentiators worth emphasizing in a presentation.
+
+### 1. Explicit Action Validation
+
+The system does not assume a click worked just because the browser executed it.
+It checks whether the page state actually changed.
+
+### 2. Re-Observation After State Change
+
+The system can re-understand the page after meaningful transitions instead of treating each page as a one-shot snapshot.
+
+### 3. Evidence Preservation
+
+Outputs are not just logs. They include:
+
+- screenshots
+- DOM snapshots
+- page insights
+- datasets
+- inventory and sitemap artifacts
+- competitive-analysis summaries and reports
+
+### 4. Report Layer
+
+The system can turn crawl artifacts into a human-readable report instead of forcing reviewers to inspect raw JSON.
+
+
+## 8. What Is Still Not Convincing Enough
+
+The project already proves:
+
+- the architecture is viable
+- the runtime can complete meaningful public-site analysis
+- the output chain is real
+
+But it does not yet fully prove:
+
+- analyst-quality report sharpness
+- strong reliability on registration-gated products
+- benchmark-grade repeatability across many targets
+
+
+## 9. Main Risks To Surface
+
+- report quality still needs calibration against strong human-written analyst memos
+- registration and verification flows are less validated than public browsing
+
+
+## 10. Questions And Answers
+
+### Why use Playwright instead of the user's local browser?
+
+Short answer:
+
+- we chose Playwright because it gives us a cleaner execution boundary, better reproducibility, and stronger artifact control
+
+Longer answer:
+
+- For this project, the browser is not just a UI surface. It is also the execution substrate for evidence capture.
+- We need stable control over:
+  - navigation
+  - DOM capture
+  - screenshots
+  - state-change validation
+  - per-run artifact ownership
+- Using an existing local browser session is attractive for login continuity, but it introduces tradeoffs:
+  - weaker reproducibility
+  - more environment coupling
+  - more variability across runs
+  - harder isolation of site-specific artifacts
+- For a competitive-analysis demo, inspectability and repeatability matter a lot.
+- So the current choice is:
+  - keep Playwright as the default runtime
+  - prefer a controlled browser environment
+  - accept that existing-session reuse may become a later integration path, not the foundation
+
+The honest tradeoff:
+
+- this choice is better for evidence quality
+- it is worse than a local-browser/CDP approach when the main goal is inheriting an already-authenticated user session
+
+### Why are login and registration flows still not adapted well enough?
+
+Short answer:
+
+- because auth flows are the least standardized part of the web, and our current implementation is intentionally still conservative and selector-driven
+
+Longer answer:
+
+- Public browsing generalizes relatively well because link discovery, content capture, and page understanding have recurring patterns.
+- Login and registration do not generalize as easily because they vary heavily in:
+  - form layout
+  - field naming
+  - multi-step sequencing
+  - OTP / magic-link verification
+  - anti-bot pressure
+  - region / provider-specific widgets
+- Our current auth layer is a first-pass, demo-scoped system:
+  - `public`
+  - `login`
+  - `register`
+  - `auto`
+- It works best on standard email/password forms and basic verification flows.
+- It is intentionally not presented as a fully general onboarding agent.
+
+The real reason this area is weaker than public mode:
+
+- public exploration benefits from many repeated page patterns
+- auth flows contain product-specific edge cases that are harder to abstract safely without overfitting
+
+What we have done already:
+
+- multi-step auth progression
+- first-pass verification-step detection
+- manual verification continuation
+- challenge freeze and resume
+
+What is still missing:
+
+- stronger semantic form planning
+- more real-site validation
+- clearer support boundaries for multi-step onboarding and verification-heavy flows
+
+### What is the novelty score, and what does it do?
+
+Short answer:
+
+- novelty score is a structural DOM-difference score, not a business-value score and not a visual-quality score
+
+How it works:
+
+- Each page state is fingerprinted based on DOM structure.
+- The fingerprint includes:
+  - a shallow tag-tree shape
+  - UI component-class inventory
+  - counts of structural elements
+- A new page state is compared against previously seen states.
+- Novelty is calculated as:
+  - `1.0` for a completely new structure
+  - `0.0` for an exact duplicate
+  - intermediate values for partial similarity
+
+What it is used for:
+
+- skipping low-value duplicate interaction captures
+- reducing repeated capture of nearly identical states
+- helping screenshot selection in reports
+- improving coverage efficiency under a finite state budget
+
+What it is not:
+
+- not a measure of business importance
+- not a measure of product quality
+- not a semantic understanding score
+
+Why that distinction matters:
+
+- If someone hears "novelty," they may assume it means "interesting."
+- In this system it really means:
+  - "structurally different from what we already saw"
+
+So the right defense is:
+
+- novelty is a deduplication and coverage-efficiency heuristic
+- it is one ranking signal, not the definition of importance
+
+### How is this different from a typical browser-use agent?
+
+Short answer:
+
+- the main difference is that this project is optimized for evidence-backed analysis, not just task completion
+
+Typical browser-use systems optimize for:
+
+- finishing a task
+- taking flexible actions
+- following natural-language goals
+
+This project also cares about taskful browsing, but it adds a second requirement:
+
+- preserve enough structured evidence to justify later claims
+
+That leads to several differences:
+
+- explicit artifact system
+  - screenshots
+  - DOM snapshots
+  - page insights
+  - structured datasets
+  - inventory and sitemap artifacts
+- explicit action validation instead of assuming execution success
+- explicit re-observation after state change
+- structured extraction and aggregation, not just transcripts
+- readable report generation as a first-class output
+
+So the practical difference is:
+
+- a browser-use agent proves it can act
+- this system tries to prove both that it can act and that its conclusions are reviewable
+
+### Why not just use screenshots plus an LLM?
+
+Because screenshots alone are too weak for reliable downstream analysis.
+
+We need:
+
+- DOM-grounded anchors
+- repeatable state capture
+- route and interaction history
+- structured evidence that can be aggregated across pages
+
+An LLM-only screenshot pipeline may look impressive in a demo, but it usually weakens:
+
+- traceability
+- reproducibility
+- failure analysis
+- confidence in cross-page aggregation
+
+
+### How do we know the report is grounded instead of made up?
+
+Because the report is downstream of preserved artifacts rather than generated from memory alone.
+
+The system keeps:
+
+- page screenshots
+- DOM snapshots
+- page insights
+- extracted datasets
+- inventory and sitemap artifacts
+
+That means the report can be audited against captured evidence.
+
+The current weakness is not total lack of grounding. The current weakness is:
+
+- report sharpness and prioritization still need improvement
+
+So the honest defense is:
+
+- grounding is already a strength
+- final narrative quality is improving, but not finished
+
+### Why not use a framework like LangGraph or a more complex multi-agent setup?
+
+Because the main bottleneck right now is not orchestration complexity. It is evidence quality, runtime reliability, and report usefulness.
+
+The current loop is still naturally expressible as:
+
+- observe
+- decide
+- act
+- validate
+- re-observe
+
+Keeping that explicit has benefits:
+
+- easier auditing
+- easier debugging
+- easier artifact ownership
+- lower architectural overhead
+
+This may change later, but at the current stage the simpler architecture is a feature, not a limitation.

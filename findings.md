@@ -64,7 +64,6 @@
 - Registration mode has first-pass support, but real external validation is still thinner than public-mode validation.
 - Comparison report quality still needs calibration against human-written competitive-analysis memos.
 - Screenshot ranking is improved, but human-judged validation is still missing.
-- Some mojibake / text cleanup remains in the reporting pipeline.
 - The new ad-hoc URL runner is optimized for public sites; auth-heavy or challenge-heavy targets still rely more on explicit config.
 
 ## Validation State
@@ -114,3 +113,28 @@
   - route-family-aware screenshot selection
 - Remaining cleanup:
   - lower-level structured evidence samples can still include mojibake/noisy labels even when the readable report filters most of them
+
+## UX Report Orchestration Work
+
+- The strongest lesson from `web-access` is not a hidden markdown template; it is orchestration that asks the model to form a judgment rather than summarize artifacts.
+- The previous `ux_report.md` path was still too artifact-first:
+  - it exposed internal ontology such as surfaces and cues
+  - it read like a cleaned run log
+  - it did not maintain an intermediate judgment layer
+- A new reviewer-style memo layer now exists in `src/analysis/ux_review.py`.
+  - It converts rich artifacts into:
+    - scope notes
+    - strengths
+    - issues
+    - user judgments
+    - prioritized recommendations
+    - supporting visuals
+- This creates a better pipeline shape:
+  - artifacts -> review memo -> report
+  - instead of artifacts -> summary report
+- `ponder.ing` validates the value of this orchestration change:
+  - the regenerated `ux_report.md` now reads like a UX review, not an execution transcript
+  - the report keeps richer evidence than the `web-access` example while still leading with judgment
+  - UTF-8 report files now render clean Chinese labels when read outside PowerShell's default console encoding
+- Remaining UX-report weakness:
+  - the quality ceiling still depends heavily on whether the run covers one meaningful task flow rather than only route-to-route navigation

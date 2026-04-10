@@ -53,6 +53,12 @@
 - Added bounded site concurrency for batch public runs with isolated per-site output roots.
 - Added shared vision-request throttling to reduce API/network contention during concurrent runs.
 - Added CLI support for passing one to three target URLs directly without writing a dedicated batch config.
+- Added a dedicated UX-report path for auth-gated single-site reviews with manual-login continuation.
+- Replaced the old artifact-summary UX write-up with a reviewer-style memo pipeline:
+  - `ux_review.py` now synthesizes strengths, issues, user judgments, recommendations, and supporting visuals from the artifact set
+  - `ux_report.py` now renders that memo into a judgment-first report rather than a state-by-state summary
+- Normalized mojibake-prone labels and hints during report regeneration so UTF-8 outputs read cleanly in the generated markdown files.
+- Improved UX screenshot selection so visuals are drawn from finding-related URLs rather than simply the first high-scoring page.
 
 ## Latest Validation
 
@@ -65,6 +71,7 @@
   - evidence-backed competitive-analysis positioning
   - improved report insight quality
   - public multi-site runner ergonomics
+- Decide whether the new reviewer-style orchestration should also reshape `competitive_analysis_readable.md`, not just `ux_report.md`.
 - Run fresh smoke tests for:
   - ad-hoc multi-URL public mode
   - public `artificialanalysis` demo config
@@ -102,3 +109,5 @@
   - added CLI ad-hoc URL mode for 1-3 targets
 - Latest local validation:
   - `python -m compileall src` passed after the CLI and runner changes
+  - `python -m compileall src` passed after the reviewer-style UX report refactor
+  - `python -m src.tools.regenerate_reports --config config\\smoke_test_ponder_ux.yaml` succeeded after the report refactor

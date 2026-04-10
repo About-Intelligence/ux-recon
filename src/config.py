@@ -226,6 +226,7 @@ class SynthesisConfig(BaseModel):
     artifact_filename_md: str = "competitive_analysis.md"
     structured_report_filename_md: str = "competitive_analysis_structured.md"
     readable_report_filename_md: str = "competitive_analysis_readable.md"
+    ux_report_filename_md: str = "ux_report.md"
 
 
 class OutputConfig(BaseModel):

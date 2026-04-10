@@ -33,6 +33,9 @@ class Authenticator:
         if mode == "public":
             console.print("[yellow]Access mode: public[/yellow]")
             return await self._enter_public_site()
+        if mode == "manual":
+            console.print("[yellow]Access mode: manual[/yellow]")
+            return await self._manual_login()
         if mode == "register":
             console.print("[yellow]Access mode: register[/yellow]")
             return await self._register_account()
@@ -48,6 +51,13 @@ class Authenticator:
         mode = self._resolve_mode()
         if mode in {"public", "register"}:
             return True
+        if mode == "manual":
+            url = await self.controller.get_url()
+            if self._looks_like_auth_url(url):
+                return False
+            if await self._looks_like_verification_step():
+                return False
+            return not await self._looks_like_auth_surface()
         if not self.config.login.username or not self.config.login.password:
             return True
         url = await self.controller.get_url()
@@ -64,7 +74,7 @@ class Authenticator:
     def _resolve_mode(self) -> str:
         cfg = self.config.login
         explicit = cfg.mode.strip().lower()
-        if explicit in {"public", "login", "register"}:
+        if explicit in {"public", "login", "register", "manual"}:
             return explicit
 
         if cfg.username and cfg.password:
@@ -88,6 +98,61 @@ class Authenticator:
 
         return await self._advance_auth_flow("login")
 
+    async def _manual_login(self) -> bool:
+        if not self.config.task.human_assistance_allowed:
+            console.print("[red]Manual login mode requires human assistance to be enabled[/red]")
+            return False
+
+        if not await self._goto_with_retry(self.config.target.url):
+            console.print("[red]Failed to reach the target site before manual login[/red]")
+            return False
+
+        console.print(
+            "[yellow]Please complete login manually in the visible browser, then return here and press Enter. "
+            "Type 'abort' to stop.[/yellow]"
+        )
+
+        for attempt in range(5):
+            try:
+                response = await asyncio.to_thread(
+                    console.input,
+                    "[bold cyan]Press Enter after manual login is complete, or type 'abort': [/bold cyan]",
+                )
+            except EOFError:
+                self._manual_abort_requested = True
+                console.print("[red]Manual login aborted because no further terminal input was available[/red]")
+                return False
+
+            if response.strip().lower() == "abort":
+                self._manual_abort_requested = True
+                console.print("[red]Manual login aborted by user[/red]")
+                return False
+
+            await self._wait_after_submit()
+
+            if await self._looks_like_verification_step():
+                return await self._complete_manual_verification()
+
+            success_indicator = self.config.login.success_indicator
+            if success_indicator:
+                try:
+                    await self.controller.page.locator(success_indicator).first.wait_for(state="visible", timeout=3000)
+                    return True
+                except Exception:
+                    pass
+
+            current_url = await self.controller.get_url()
+            if not self._looks_like_auth_url(current_url) and not await self._looks_like_auth_surface():
+                return True
+
+            console.print(
+                f"[yellow]The current page still looks like an auth surface after attempt {attempt + 1}. "
+                "Finish the login flow in the browser, then try again.[/yellow]"
+            )
+
+        console.print("[red]Manual login did not appear to reach a post-login product surface[/red]")
+        return False
+
     async def _register_account(self) -> bool:
         cfg = self.config.login
 
@@ -98,6 +163,7 @@ class Authenticator:
 
         if cfg.register_link_selector:
             try:
+                page = self.controller.page
                 link = page.locator(cfg.register_link_selector).first
                 await link.wait_for(state="visible", timeout=10000)
                 await link.click()
@@ -171,31 +237,35 @@ class Authenticator:
     async def _fill_and_submit_auth_step(self, flow: str) -> bool:
         cfg = self.config.login
         task = self.config.task
+        auth_scope = await self._locate_auth_scope()
 
         if flow == "register":
             email_value = task.profile_email
             password_value = task.profile_password
-            await self._fill_optional(cfg.registration_name_selector, task.profile_name)
-            await self._fill_optional(cfg.registration_company_selector, task.profile_company)
-            await self._fill_optional(cfg.registration_email_selector, email_value)
-            await self._fill_optional(cfg.username_selector, email_value)
-            await self._fill_optional(cfg.registration_password_selector, password_value)
-            await self._fill_optional(cfg.registration_confirm_password_selector, password_value)
+            await self._fill_optional(cfg.registration_name_selector, task.profile_name, scope=auth_scope)
+            await self._fill_optional(cfg.registration_company_selector, task.profile_company, scope=auth_scope)
+            await self._fill_optional(cfg.registration_email_selector, email_value, scope=auth_scope)
+            await self._fill_optional(cfg.username_selector, email_value, scope=auth_scope)
+            await self._fill_optional(cfg.registration_password_selector, password_value, scope=auth_scope)
+            await self._fill_optional(cfg.registration_confirm_password_selector, password_value, scope=auth_scope)
             submit_selector = cfg.registration_submit_selector or cfg.submit_selector
         else:
             email_value = cfg.username or task.profile_email
             password_value = cfg.password or task.profile_password
-            await self._fill_optional(cfg.username_selector, email_value)
-            await self._fill_optional(cfg.registration_email_selector, email_value)
-            await self._fill_optional(cfg.password_selector, password_value)
+            await self._fill_optional(cfg.username_selector, email_value, scope=auth_scope)
+            await self._fill_optional(cfg.registration_email_selector, email_value, scope=auth_scope)
+            await self._fill_optional(cfg.password_selector, password_value, scope=auth_scope)
             submit_selector = cfg.submit_selector
 
-        if not await self._has_visible_auth_fields(flow):
+        if not await self._has_visible_auth_fields(flow, scope=auth_scope):
             return False
 
-        return await self._click_first_visible(submit_selector)
+        if await self._click_first_visible(submit_selector, scope=auth_scope):
+            return True
 
-    async def _has_visible_auth_fields(self, flow: str) -> bool:
+        return await self._submit_with_enter(flow, auth_scope)
+
+    async def _has_visible_auth_fields(self, flow: str, scope=None) -> bool:
         cfg = self.config.login
         selectors = [cfg.username_selector, cfg.registration_email_selector]
         if flow == "register":
@@ -209,7 +279,7 @@ class Authenticator:
             selectors.append(cfg.password_selector)
 
         for selector in selectors:
-            if await self._has_visible_match(selector):
+            if await self._has_visible_match(selector, scope=scope):
                 return True
         return False
 
@@ -250,12 +320,12 @@ class Authenticator:
         console.print("[red]Still on an auth page after submit[/red]")
         return False
 
-    async def _fill_first_visible(self, selector: str, value: str) -> bool:
-        page = self.controller.page
+    async def _fill_first_visible(self, selector: str, value: str, scope=None) -> bool:
         if not selector or not value:
             return False
 
-        locator = page.locator(selector)
+        root = scope or self.controller.page
+        locator = root.locator(selector)
         count = await locator.count()
         for index in range(min(count, 5)):
             try:
@@ -274,12 +344,12 @@ class Authenticator:
                 continue
         return False
 
-    async def _click_first_visible(self, selector: str) -> bool:
-        page = self.controller.page
+    async def _click_first_visible(self, selector: str, scope=None) -> bool:
         if not selector:
             return False
 
-        locator = page.locator(selector)
+        root = scope or self.controller.page
+        locator = root.locator(selector)
         count = await locator.count()
         for index in range(min(count, 8)):
             try:
@@ -298,10 +368,10 @@ class Authenticator:
                 continue
         return False
 
-    async def _fill_optional(self, selector: str, value: str) -> None:
+    async def _fill_optional(self, selector: str, value: str, scope=None) -> None:
         if not selector or not value:
             return
-        await self._fill_first_visible(selector, value)
+        await self._fill_first_visible(selector, value, scope=scope)
 
     def _looks_like_auth_url(self, url: str) -> bool:
         lowered = url.lower()
@@ -337,10 +407,11 @@ class Authenticator:
         """, default=[])
         return bool(text_matches)
 
-    async def _has_visible_match(self, selector: str) -> bool:
+    async def _has_visible_match(self, selector: str, scope=None) -> bool:
         if not selector:
             return False
-        locator = self.controller.page.locator(selector)
+        root = scope or self.controller.page
+        locator = root.locator(selector)
         try:
             count = await locator.count()
             for index in range(min(count, 8)):
@@ -349,6 +420,89 @@ class Authenticator:
         except Exception:
             return False
         return False
+
+    async def _locate_auth_scope(self):
+        page = self.controller.page
+        container_selectors = [
+            "form",
+            "[role='dialog']",
+            "[class*='login']",
+            "[class*='auth']",
+            "[class*='signin']",
+            "[class*='sign-in']",
+            "[class*='signup']",
+            "[class*='sign-up']",
+            "[data-testid*='login']",
+            "[data-testid*='auth']",
+        ]
+        auth_inputs = [
+            self.config.login.username_selector,
+            self.config.login.registration_email_selector,
+            self.config.login.password_selector,
+            self.config.login.registration_password_selector,
+            self.config.login.verification_code_selector,
+        ]
+
+        for container_selector in container_selectors:
+            locator = page.locator(container_selector)
+            try:
+                count = await locator.count()
+            except Exception:
+                continue
+            for index in range(min(count, 10)):
+                candidate = locator.nth(index)
+                try:
+                    if not await candidate.is_visible():
+                        continue
+                    for selector in auth_inputs:
+                        if not selector:
+                            continue
+                        if await self._has_visible_match(selector, scope=candidate):
+                            return candidate
+                except Exception:
+                    continue
+        return None
+
+    async def _submit_with_enter(self, flow: str, scope=None) -> bool:
+        selectors = []
+        if flow == "register":
+            selectors.extend([
+                self.config.login.registration_confirm_password_selector,
+                self.config.login.registration_password_selector,
+                self.config.login.registration_email_selector,
+                self.config.login.username_selector,
+            ])
+        else:
+            selectors.extend([
+                self.config.login.password_selector,
+                self.config.login.registration_email_selector,
+                self.config.login.username_selector,
+            ])
+
+        root = scope or self.controller.page
+        for selector in selectors:
+            if not selector:
+                continue
+            locator = root.locator(selector)
+            try:
+                count = await locator.count()
+            except Exception:
+                continue
+            for index in range(min(count, 5)):
+                try:
+                    item = locator.nth(index)
+                    if not await item.is_visible():
+                        continue
+                    await item.press("Enter")
+                    return True
+                except Exception:
+                    continue
+
+        try:
+            await self.controller.page.keyboard.press("Enter")
+            return True
+        except Exception:
+            return False
 
     async def _looks_like_verification_step(self) -> bool:
         cfg = self.config.login

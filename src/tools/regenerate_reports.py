@@ -10,6 +10,7 @@ import click
 from src.agent.state import AgentState, ExplorationTarget, StateSnapshot, TargetType, VisitStatus
 from src.analysis.competitive_report import CompetitiveReportGenerator
 from src.analysis.readable_report import ReadableCompetitiveReportGenerator
+from src.analysis.ux_report import UserExperienceReportGenerator
 from src.config import load_config
 
 
@@ -81,9 +82,9 @@ def _rebuild_state(artifacts_root: Path) -> AgentState:
             retry_count=int(item.get("retries", 0)),
             error=item.get("error"),
             metadata={
-                "capture_label": str(item.get("label", "")),
-                "capture_context": str(item.get("target_type", "")),
-                "report_screenshot_path": _report_screenshot_path(screenshot_path),
+                "capture_label": str(item.get("capture_label") or item.get("label", "")),
+                "capture_context": str(item.get("capture_context") or item.get("target_type", "")),
+                "report_screenshot_path": str(item.get("report_screenshot_path") or _report_screenshot_path(screenshot_path)),
             },
         )
         state.states[snapshot.id] = snapshot
@@ -120,6 +121,7 @@ def main(config_path: str | None, artifacts_dir: str | None, reports_dir: str | 
 
     generator = CompetitiveReportGenerator()
     readable_generator = ReadableCompetitiveReportGenerator()
+    ux_generator = UserExperienceReportGenerator()
     competitive = generator.generate(
         state,
         analysis_results=analysis_results,
@@ -141,6 +143,16 @@ def main(config_path: str | None, artifacts_dir: str | None, reports_dir: str | 
     )
     (reports_root / config.synthesis.readable_report_filename_md).write_text(
         readable_generator.generate(
+            state,
+            competitive,
+            page_insights,
+            extraction_results,
+            reports_root,
+        ),
+        encoding="utf-8",
+    )
+    (reports_root / config.synthesis.ux_report_filename_md).write_text(
+        ux_generator.generate(
             state,
             competitive,
             page_insights,
